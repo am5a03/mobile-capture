@@ -1,18 +1,22 @@
 # Publish a downloadable release
 
 Use this guide after the release workflow is merged into the default branch.
-It builds the complete Apple Silicon app when you publish a GitHub Release, then
-attaches the app ZIP and `SHA256SUMS` to that release. Tag pushes alone do not
-publish downloads. Builds currently require macOS 26.
+Push a version tag to build the complete Apple Silicon app. The workflow attaches
+the app ZIP and `SHA256SUMS`, then publishes the GitHub Release. It uses GitHub
+CLI's draft-upload-publish sequence, which supports immutable releases. Builds
+currently require macOS 26.
 
 ## Publish a development prerelease
 
-1. Open [Releases](https://github.com/am5a03/mobile-capture/releases).
-2. Choose **Draft a new release**.
-3. Create a tag such as `v0.1.1-beta.1` from the tested commit.
-4. Select **Set as a pre-release** and add the release notes.
-5. Choose **Publish release**.
-6. Wait for **Downloadable release** in Actions to finish.
+From the tested commit on `main`, create and push a prerelease tag:
+
+```sh
+git tag v0.1.1-beta.1
+git push origin v0.1.1-beta.1
+```
+
+Wait for **Downloadable release** in Actions to finish. The `alpha`, `beta` or `rc`
+suffix selects development signing and marks the new release as a prerelease.
 
 The release's Assets section then contains
 `MobileCapture-macOS-arm64-development.zip` and `SHA256SUMS`. The ZIP includes
@@ -61,7 +65,13 @@ setup refuses to run on a developer Mac or a self-hosted runner.
 1. Complete the outstanding device, fresh-Mac and release acceptance checks in
    [the distribution guide](CAPTURE-DISTRIBUTION.md).
 2. Configure the signing secrets and variables above.
-3. Publish a release with a tag such as `v0.1.1` and leave **Set as a pre-release** off.
+3. Create and push a stable tag from the tested commit:
+
+```sh
+git tag v0.1.1
+git push origin v0.1.1
+```
+
 4. Wait for **Downloadable release** to finish.
 
 The workflow signs the app and nested tools with Developer ID, submits the ZIP
@@ -74,13 +84,14 @@ Successful stable releases contain `MobileCapture-macOS-arm64.zip` and
 
 <https://github.com/am5a03/mobile-capture/releases/latest/download/MobileCapture-macOS-arm64.zip>
 
-The URL becomes usable after the first successful stable release. Draft releases
-and releases whose build failed do not have a finished app download. Publishing
-makes the release page visible before the build has finished. Wait for the assets.
+The URL becomes usable after the first successful stable release. The workflow
+publishes only after it has uploaded the verified assets. Creating a release
+manually in the GitHub web UI does not run this tag-push workflow.
 
-To retry a failed build, use **Re-run jobs** in Actions. Uploads are serialized per
-tag. A successful retry replaces this workflow's matching asset names through
-`gh release upload --clobber`. Publish a new version for a changed source commit.
+To retry a build failure, use **Re-run jobs** in Actions. Publication is serialized
+per tag. If an upload failure leaves a draft, inspect that draft before retrying
+publication. GitHub CLI does not overwrite an existing release. Publish a new
+version for a changed source commit.
 
 ## Install the app
 
@@ -115,6 +126,6 @@ or tampered cache fails the build. Normal pull-request CI repeats this path and
 builds a complete development ZIP with an overridden app version.
 
 Developer ID signing, Apple notarization and the final GitHub asset upload require
-their real credentials and a published release. Local fixtures do not prove those
+their real credentials and a pushed version tag. Local fixtures do not prove those
 external operations. The release workflow does not bundle the experimental USB
 candidate or change the existing hardware/release acceptance requirements.

@@ -14,16 +14,17 @@ SIGNING = ("APPLE_CERTIFICATE_P12_BASE64", "APPLE_CERTIFICATE_PASSWORD", "APPLE_
            "CAPTURE_BUNDLE_IDENTIFIER", "APPLE_NOTARY_KEY_P8_BASE64", "APPLE_NOTARY_KEY_ID", "APPLE_NOTARY_ISSUER_ID")
 
 def plan(event):
-    release = event.get("release", {})
-    tag = release.get("tag_name", "")
+    ref = event.get("ref", "")
+    if not ref.startswith("refs/tags/") or event.get("deleted") is not False:
+        raise ValueError("Push a version tag; branch pushes and tag deletions do not publish releases")
+    tag = ref[len("refs/tags/"):]
     match = TAG.fullmatch(tag)
-    if event.get("action") != "published" or release.get("draft") is not False or not match:
-        raise ValueError("Publish a release tagged vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-beta.1")
-    prerelease = release.get("prerelease")
-    if not isinstance(prerelease, bool) or prerelease != ("-" in tag):
-        raise ValueError("Prerelease tags and the GitHub prerelease checkbox must agree")
+    if not match:
+        raise ValueError("Use vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-beta.1")
+    prerelease = "-" in tag
     return {"tag": tag, "version": ".".join(match.groups()[:3]),
-            "mode": "development" if prerelease else "release"}
+            "mode": "development" if prerelease else "release",
+            "prerelease": "true" if prerelease else "false"}
 
 def check_signing(environment):
     missing = [key for key in SIGNING if not environment.get(key)]

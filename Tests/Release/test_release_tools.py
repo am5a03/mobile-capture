@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import importlib.util
 import io
@@ -21,34 +20,30 @@ def module(name, filename):
 release = module("release_assets", "release-assets.py")
 cache = module("capture_cache", "prepare-capture-cache.py")
 
-def event(tag="v1.2.3", prerelease=False):
-    return {"action": "published", "release": {"tag_name": tag, "draft": False, "prerelease": prerelease}}
+def event(tag="v1.2.3"):
+    return {"ref": "refs/tags/" + tag, "deleted": False}
 
 class ReleaseMetadataTests(unittest.TestCase):
     def test_stable_release_sets_app_version_and_signing_mode(self):
-        self.assertEqual(release.plan(event()), {"tag": "v1.2.3", "version": "1.2.3", "mode": "release"})
+        self.assertEqual(release.plan(event()), {"tag": "v1.2.3", "version": "1.2.3", "mode": "release", "prerelease": "false"})
 
     def test_prerelease_uses_development_package_with_numeric_app_version(self):
         for suffix in ("alpha.1", "beta.2", "rc.3"):
             with self.subTest(suffix=suffix):
-                self.assertEqual(release.plan(event("v0.2.0-"+suffix, True))["version"], "0.2.0")
-                self.assertEqual(release.plan(event("v0.2.0-"+suffix, True))["mode"], "development")
+                self.assertEqual(release.plan(event("v0.2.0-"+suffix))["version"], "0.2.0")
+                self.assertEqual(release.plan(event("v0.2.0-"+suffix))["mode"], "development")
 
     def test_rejects_shell_fragments_paths_and_invalid_versions(self):
         for tag in ("v1.2.3;echo unsafe", "$(whoami)", "../v1.2.3", "v01.2.3", "v1.2", "v1.2.3\nmode=development", "v1.2.3-beta.0"):
             with self.subTest(tag=tag), self.assertRaises(ValueError):
                 release.plan(event(tag))
 
-    def test_release_kind_and_tag_must_agree(self):
-        for payload in (event("v1.2.3", True), event("v1.2.3-beta.1", False), event("v1.2.3", "false")):
-            with self.assertRaises(ValueError):
-                release.plan(payload)
+    def test_prerelease_flag_is_derived_from_the_version_tag(self):
+        self.assertEqual(release.plan(event("v1.2.3-beta.1"))["prerelease"], "true")
+        self.assertEqual(release.plan(event())["prerelease"], "false")
 
-    def test_drafts_and_other_release_actions_are_rejected(self):
-        for key, value in (("action", "created"), ("draft", True)):
-            payload=event()
-            if key == "action": payload[key]=value
-            else: payload["release"][key]=value
+    def test_branch_pushes_deletions_and_unrelated_events_are_rejected(self):
+        for payload in ({"ref":"refs/heads/v1.2.3", "deleted":False}, {"ref":"refs/tags/v1.2.3", "deleted":True}, {"release":{"tag_name":"v1.2.3"}}):
             with self.assertRaises(ValueError): release.plan(payload)
 
     def test_stable_release_reports_missing_signing_without_secret_values(self):

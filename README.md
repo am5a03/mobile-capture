@@ -22,11 +22,11 @@ timeline's reading position and selected event.
 Open [Releases](https://github.com/am5a03/mobile-capture/releases) and download the
 app ZIP under Assets. Unzip it, move **Mobile Capture.app** into **Applications**,
 and open it to begin Device Setup. Current packages require Apple Silicon and
-macOS 26. A release's app ZIP appears after its build finishes.
+macOS 26. A release becomes visible after its verified app ZIP is attached.
 
 Stable releases use `MobileCapture-macOS-arm64.zip`. Development prereleases use
 `MobileCapture-macOS-arm64-development.zip` and are not notarized. The release
-workflow needs to be merged and a release published before downloads exist.
+workflow needs to be merged and a version tag pushed before downloads exist.
 See [publish a downloadable release](docs/RELEASES.md) for the maintainer steps.
 
 ## Build

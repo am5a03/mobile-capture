@@ -117,8 +117,8 @@ transitive dependency SBOM.
 ## Automated GitHub downloads
 
 [Publish a downloadable release](RELEASES.md) describes the release workflow.
-It prepares an external cache from pinned official downloads, builds the complete
-app and attaches a verified ZIP and checksum to the published GitHub Release.
+A version-tag push prepares a cache from pinned official downloads, builds the
+complete app and publishes a GitHub Release containing its verified ZIP and checksum.
 Stable releases require Developer ID signing and notarization credentials.
 Development prereleases use explicit ad-hoc signing. The local packaging script
 still only prepares files; the GitHub workflow owns the asset upload.
