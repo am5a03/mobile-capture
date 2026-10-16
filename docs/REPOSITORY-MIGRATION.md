@@ -27,6 +27,27 @@ the original commit history remains available in the source repository.
 
 ## Validation
 
-See the repository migration validation checkpoint added after the isolated build,
-fixture suites and full development-package checks. No hardware capture is needed
-to prove the source/build boundary; existing hardware acceptance gaps remain.
+Validated on Apple Silicon with macOS 26, Xcode 26.6 and Swift 6.3.3:
+
+| Check | Result |
+| --- | --- |
+| Generated standalone project | Exactly three capture targets; no original-checkout paths or Swift package dependencies |
+| Optimized app and both helpers | Passed with Swift 6 warnings as errors |
+| Core fixture group | Handoff/catalog, plans, readiness, USB discovery and private profile fixtures passed |
+| Services fixture group | Doctor/setup state, discovery/export, lifecycle/recovery and bounded logs passed |
+| Timeline fixture group | Native index/store, table resize/selection/follow and command-target fixtures passed |
+| Swift Testing total | 194 tests passed, in addition to the standalone fixture checks |
+| Python runtime/proof/setup fixtures | 68 tests, passed with one optional real-engine test skipped |
+| Complete development packaging | Passed using the pre-existing external pinned cache; experimental iPhone USB candidate included |
+| Product boundary and sealed dependency hashes | Passed; no original Android app/MCP or Sparkle payload |
+| Deep/strict signatures, clean-PATH tool probes and actual packaged Doctor | Passed; no phone connection probes |
+| ZIP integrity and SHA256SUMS | Passed |
+| Shell/Python syntax and local documentation links | Passed |
+
+The source/runtime/tests/lock files were imported unchanged; an inherited extra
+blank line at the end of one Swift file was removed afterward. Build/CI/release
+configuration and current repository guidance were adapted for this checkout.
+The packaged artifact is a local ad-hoc signed arm64 development build, not a
+notarized release. No capture evidence or dependency binaries are committed.
+No device capture, certificate/profile installation or routing change was made
+for this migration. Existing hardware/fresh-Mac/release acceptance gaps remain.

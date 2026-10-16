@@ -59,4 +59,3 @@ struct CaptureRuntimeClient: Sendable {
         catch { throw AppError("The capture service returned an unreadable response: \(error.localizedDescription)") }
     }
 }
-
