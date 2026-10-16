@@ -1,0 +1,37 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [core, services, timeline, python]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run fixture tests (${{ matrix.group }})
+        run: bash Scripts/test-all.sh "${{ matrix.group }}"
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate standalone project
+        run: xcodegen generate
+      - name: Build app and native helpers (warnings are errors)
+        run: |
+          xcodebuild -project MobileCapture.xcodeproj -scheme MobileCapture -configuration Release \
+            -derivedDataPath build/DerivedData CODE_SIGN_IDENTITY=- build
+      - name: Check standalone product boundary
+        run: |
+          python3 -B Scripts/check-capture-product.py --product capture \
+            --app "build/DerivedData/Build/Products/Release/Mobile Capture.app" --allow-unbundled-dependencies

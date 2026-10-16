@@ -1,0 +1,132 @@
+name: MobileCapture
+options:
+  bundleIdPrefix: local.mobilecapture
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MOBILE_CAPTURE_BUNDLE_IDENTIFIER: local.mobilecapture.development
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    # Ad-hoc signing so anyone can build and run. Scripts/release.sh signs with a Developer ID.
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    DEAD_CODE_STRIPPING: YES
+  configs:
+    Release:
+      # Notarization rejects get-task-allow and signatures without a secure timestamp.
+      CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+      OTHER_CODE_SIGN_FLAGS: "--timestamp"
+targets:
+  mobile-capture-host:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/Core/Support.swift
+      - path: Sources/Core/Shell/ShellRunner.swift
+      - path: Sources/Core/CaptureModels.swift
+      - path: Sources/Core/Capture
+      - path: Sources/Core/CaptureServices
+      - path: Sources/Core/CaptureLifecycle
+      - path: Sources/CaptureHost
+    settings:
+      base:
+        PRODUCT_NAME: mobile-capture-host
+        PRODUCT_MODULE_NAME: MobileCaptureHost
+        PRODUCT_BUNDLE_IDENTIFIER: "$(MOBILE_CAPTURE_BUNDLE_IDENTIFIER).host"
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        SKIP_INSTALL: YES
+
+  mobile-capture-proxy:
+    type: tool
+    platform: macOS
+    sources:
+      - path: Sources/CaptureProxy
+    settings:
+      base:
+        PRODUCT_NAME: mobile-capture-proxy
+        PRODUCT_MODULE_NAME: MobileCaptureProxy
+        PRODUCT_BUNDLE_IDENTIFIER: "$(MOBILE_CAPTURE_BUNDLE_IDENTIFIER).proxy"
+        GENERATE_INFOPLIST_FILE: YES
+        CREATE_INFOPLIST_SECTION_IN_BINARY: YES
+        SKIP_INSTALL: YES
+
+  # Independent capture application. The local identity is intentionally unsuitable for publishing.
+  MobileCapture:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources/MobileCaptureApp
+        excludes: ["Info.plist", "MobileCapture.entitlements"]
+      - path: Sources/Core/Support.swift
+      - path: Sources/Core/Shell/ShellRunner.swift
+      - path: Sources/Core/CaptureModels.swift
+      - path: Sources/Core/Capture
+      - path: Sources/Core/CaptureServices
+        excludes: ["CaptureEvidence*.swift"]
+      - path: Sources/Core/CaptureHandoff
+      - path: Sources/State/CaptureStore.swift
+      - path: Sources/State/CaptureSetupStore.swift
+      - path: Sources/State/CaptureDoctorStore.swift
+      - path: Sources/Windows/ToolWindow.swift
+      - path: Sources/Windows/CaptureWindowController.swift
+      - path: Sources/UI/CaptureView.swift
+      - path: Sources/UI/CaptureSetupView.swift
+      - path: Sources/UI/CaptureDoctorView.swift
+      - path: Sources/UI/CaptureCommands.swift
+      - path: Sources/UI/CaptureTimelineList.swift
+      - path: Sources/UI/CaptureLogSettingsView.swift
+      - path: Sources/UI/IPhoneCaptureSetupView.swift
+      - path: CaptureRuntime
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - target: mobile-capture-host
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+      - target: mobile-capture-proxy
+        embed: true
+        codeSign: true
+        copy:
+          destination: executables
+    info:
+      path: Sources/MobileCaptureApp/Info.plist
+      properties:
+        CFBundleDisplayName: Mobile Capture
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        LSApplicationCategoryType: public.app-category.developer-tools
+        LSMinimumSystemVersion: "26.0"
+        NSHighResolutionCapable: true
+        NSHumanReadableCopyright: "Includes Oh My Android contributors. MIT License."
+        MobileCaptureCompanion: true
+        MobileCaptureDevelopmentIdentity: true
+        MobileCaptureHandoffVersions: [1]
+        CaptureDistributionUpdatesEnabled: false
+        CFBundleURLTypes:
+          - CFBundleURLName: Mobile Capture Handoff
+            CFBundleURLSchemes: [mobilecapture]
+            CFBundleTypeRole: Viewer
+    entitlements:
+      path: Sources/MobileCaptureApp/MobileCapture.entitlements
+      properties:
+        com.apple.security.app-sandbox: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(MOBILE_CAPTURE_BUNDLE_IDENTIFIER)"
+        PRODUCT_NAME: Mobile Capture
+        PRODUCT_MODULE_NAME: MobileCapture
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_EMIT_LOC_STRINGS: NO
+        COMBINE_HIDPI_IMAGES: YES

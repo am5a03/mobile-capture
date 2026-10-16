@@ -1,0 +1,585 @@
+{
+  "source_repository": "https://github.com/am5a03/oh-my-android",
+  "source_commit": "2c179619f613e5ac0d829d21f0ec176a5760e666",
+  "source_branch": "codex/issue-4-unified-capture",
+  "license": "MIT; original Royan AB copyright retained in LICENSE",
+  "note": "Initial standalone extraction. Hashes record imported file content before repository-specific build/documentation adjustments. No captures, private certificates, profiles, dependency binaries or original Android app/MCP were imported.",
+  "imported_files": [
+    {
+      "path": ".gitignore",
+      "sha256": "fc8c1721ab6c24426407d695fd90836cf9ee51bde8d460fff7e2e8098d72e943"
+    },
+    {
+      "path": "CaptureRuntime/README.md",
+      "sha256": "ed817ed94b8353b03da9f7c907b1e536a0fe26b4509790264c7401f9370a524a"
+    },
+    {
+      "path": "CaptureRuntime/capture_runtime.py",
+      "sha256": "b11785f699b717b60e90636e4a9e0f325bf16c15052aa1f720df11875ce02dda"
+    },
+    {
+      "path": "CaptureRuntime/evidence.py",
+      "sha256": "9a204a10aef61fdda6eafc00e928e84ce32b757e63264048cd2a020281c1744a"
+    },
+    {
+      "path": "CaptureRuntime/network_addon.py",
+      "sha256": "73b7a11445d08e0df4c8bfcb55507789b5abed751690feb3b7e142ae0308eea4"
+    },
+    {
+      "path": "CaptureRuntime/proxy_settings.swift",
+      "sha256": "cb3d8c114b58f0bdb16a5f84247c2317c87d542dbff68b6140365fd98ea6331c"
+    },
+    {
+      "path": "Dependencies/Capture/dependencies-arm64.lock.json",
+      "sha256": "99cf69ecfef2e5ff0755f76b8bcf9b39043da780023486581dc64471ee857038"
+    },
+    {
+      "path": "Dependencies/Capture/iphone-usb-arm64.candidate.lock.json",
+      "sha256": "a738a2c029dc24b35051c2e53556a91c94635b51f3a5279777f2395845b9fe8d"
+    },
+    {
+      "path": "Dependencies/Capture/licenses/OpenSSL-3.5.5-LICENSE.txt",
+      "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+    },
+    {
+      "path": "Dependencies/Capture/licenses/Python-3.14.4-LICENSE.txt",
+      "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231"
+    },
+    {
+      "path": "Dependencies/Capture/licenses/mitmproxy-12.2.3-LICENSE.txt",
+      "sha256": "cc4ab04ed7180af6c0ede7147f9ec2aa05212c088d7b3c8e38bbffe91c9c8f82"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "657ba689548720451dadc9ebe79f1655197ea4afcfec53a97f239b5e069f5f1e"
+    },
+    {
+      "path": "Scripts/benchmark-capture-save.sh",
+      "sha256": "382fc4e95f19e2b07d64343051affde5b40b2ff51e6446eec5b090cda2f7fcbe"
+    },
+    {
+      "path": "Scripts/build-capture-proof.py",
+      "sha256": "bbc4c1490587e22f2b7e7549fa727680c14bcaebc225449f143794ab2cbd9dd6"
+    },
+    {
+      "path": "Scripts/bundle-capture-dependencies.swift",
+      "sha256": "3886619d1f9e375944afc517100e02347f7eb9694460a7a7623122b05a0a9627"
+    },
+    {
+      "path": "Scripts/bundle-iphone-usb-candidate.py",
+      "sha256": "0a0113398d2a20faaada4bd5fc15e1e2620925241db22ab4c07e92d8daf5f0bc"
+    },
+    {
+      "path": "Scripts/check-capture-product.py",
+      "sha256": "bc81828cdc184810e0ea04c45aed808c62d82faf72b1f895cdc22cc726f939ef"
+    },
+    {
+      "path": "Scripts/release-mobile-capture.sh",
+      "sha256": "1e3faa790336cbeb618f42eb5ea7f2295fc635f2c127df3a4019e12777f0feb5"
+    },
+    {
+      "path": "Scripts/release.sh",
+      "sha256": "186ac4c2455c23c13c8ccab553045e999d5b44882ff90ce686f36c9298dd76d3"
+    },
+    {
+      "path": "Scripts/serve-iphone-capture-proof.py",
+      "sha256": "3a72ae716a79920633166814cdd0f507831944ec90eb76cb761be55ccad15239"
+    },
+    {
+      "path": "Scripts/test-capture-command-target.sh",
+      "sha256": "c00775a3c2c25b17cb1d43f9061c81f78caa5a8280717c8370fc826a0ad51ac7"
+    },
+    {
+      "path": "Scripts/test-capture-doctor-bundle.sh",
+      "sha256": "381f08fd76b51ada6af16a2f361d07fb2680a1878f4e6a259a7171397880dbe0"
+    },
+    {
+      "path": "Scripts/test-capture-doctor.sh",
+      "sha256": "edc3118c86a2233ba0562a7fee44850ce74be5535efbb38c6411b66443227412"
+    },
+    {
+      "path": "Scripts/test-capture-handoff.sh",
+      "sha256": "64d5994683bfddfdaf2a7f00c3f9359bfe7e1516001846ce8eae388218a503d3"
+    },
+    {
+      "path": "Scripts/test-capture-log-writer.sh",
+      "sha256": "4db51ad5fa2941fe3efbbb7a2c5e7a710f00d4b664e6827aaac68d8adff1b28a"
+    },
+    {
+      "path": "Scripts/test-capture-plan.sh",
+      "sha256": "24d7972d70c0f776712bee4ad3074da6f5355a7dca2f931cb66605b47ea028b0"
+    },
+    {
+      "path": "Scripts/test-capture-setup-readiness.sh",
+      "sha256": "bb47ca8a14e16aa1d4aa478af688c6c9dc96abb1c8d6a5d1fab00251e7424565"
+    },
+    {
+      "path": "Scripts/test-capture-setup-store.sh",
+      "sha256": "072126097b5166354dccd230861b4dc96f367ee96ffafdc338d44eeee883a3f7"
+    },
+    {
+      "path": "Scripts/test-capture-timeline-list.sh",
+      "sha256": "62bb66bc25091a90dd4d2fa594ca61fd0023ec2572814e1242b31449c585d16a"
+    },
+    {
+      "path": "Scripts/test-capture-timeline.sh",
+      "sha256": "0d0411a9638c1b136f6e34f49dd5e9613dcabe68f36f5a5f2807ac79f243fa2f"
+    },
+    {
+      "path": "Scripts/test-capture-usb-discovery.sh",
+      "sha256": "b0ed6826b28c2f250eb6a7fee7172ec1ef4dbea6b409ea23e96016e8c90d62dc"
+    },
+    {
+      "path": "Scripts/test-capture.sh",
+      "sha256": "ba1c691a079bf5c89a44a2afdf718976003b082bf68e5f2a7fc0a93d02a95fa2"
+    },
+    {
+      "path": "Scripts/test-iphone-capture-setup.sh",
+      "sha256": "a49b906726aa8e9ffde0d536987b4ce50d6f42f6467737ab496becc1ac8b0181"
+    },
+    {
+      "path": "Scripts/test-native-capture-lifecycle.sh",
+      "sha256": "18ce5d5446e020bdb289655458c0ab3c89240993579266177d4a4ea73d2bba33"
+    },
+    {
+      "path": "Scripts/test-native-capture-services.sh",
+      "sha256": "4278af65adb25811f5cc469c7e5d9a141f2121f2861c6cd706839fc14f076ce7"
+    },
+    {
+      "path": "Scripts/test-native-timeline.sh",
+      "sha256": "71a4dc692344f416d4225a4f4b6ec8ed8c12d3a7a597861c1b670aa11f7c847a"
+    },
+    {
+      "path": "Scripts/verify-capture-proof.py",
+      "sha256": "f5841b059148cbdfb76f4a419c9806bc24f7e902bde033d7a29580004f5ff575"
+    },
+    {
+      "path": "Sources/CaptureHost/MobileCaptureHostMain.swift",
+      "sha256": "d78f57eb86679b7a70903eff6266c6e852ca0ec5ee4c62b102bb3599e59e226b"
+    },
+    {
+      "path": "Sources/CaptureProxy/ProxySettingsMain.swift",
+      "sha256": "fe71db6add05fa4cdf99a642baca3f4961f3b65e40a64b040aa81c1f3e6b01f6"
+    },
+    {
+      "path": "Sources/Core/Capture/CaptureBodyEvidence.swift",
+      "sha256": "f2a2e4e32af13ff9f69d323be9b9714da1f1fcacb0317b57fbc0b0b196d06804"
+    },
+    {
+      "path": "Sources/Core/Capture/CaptureLogScope.swift",
+      "sha256": "5b9f6fa75b4fbd5f0a01271ed6ae51a1494fa51f538f3bde00e378d0b0a4f2ff"
+    },
+    {
+      "path": "Sources/Core/Capture/CaptureLoggingPolicy.swift",
+      "sha256": "c8c3ce82361163ca288b8c5dd89aecbd750d8ed139ada63ec27155d33ffe9124"
+    },
+    {
+      "path": "Sources/Core/Capture/CaptureSaveProgress.swift",
+      "sha256": "7e3c4cfa92f2fa41327e1a2297f0a00f7ab16d758b4981fa26ea7f767ba4a19a"
+    },
+    {
+      "path": "Sources/Core/Capture/IPhoneLogFormat.swift",
+      "sha256": "df7533c3b43982384702c46436855e18a1ba42c481c32ace6afc294bf7e3b8b8"
+    },
+    {
+      "path": "Sources/Core/Capture/NativeTimelineDatabase.swift",
+      "sha256": "9f03de7ea2ebfd6f11222adf0f6a8db4683b793cb16c57dc1595016e32aeea89"
+    },
+    {
+      "path": "Sources/Core/Capture/NativeTimelineFiles.swift",
+      "sha256": "8b5b92c927ace41273b6f9144764f4d4f8f16e5e7f8568b24c4927e2fdfe7921"
+    },
+    {
+      "path": "Sources/Core/Capture/NativeTimelineModels.swift",
+      "sha256": "c62acdff8bf15e96dba519c68983b0015a5fc70622fb11dc2fb85a70ccd97319"
+    },
+    {
+      "path": "Sources/Core/Capture/NativeTimelineNormalizer.swift",
+      "sha256": "31aab070edacbacb2deb2b983112484a2dc683a113e9da77313937da9014d84a"
+    },
+    {
+      "path": "Sources/Core/Capture/NativeTimelineStore.swift",
+      "sha256": "421aff8eb30e7f51681bbae7e308183838dbf028143820e9c803dda60977a9f7"
+    },
+    {
+      "path": "Sources/Core/CaptureHandoff/CaptureCompanionApplication.swift",
+      "sha256": "f0143f9cd4bac0667f64e73f07e67c8689dac0b4b1f9ed75abc135fac969a7b7"
+    },
+    {
+      "path": "Sources/Core/CaptureHandoff/CaptureHandoff.swift",
+      "sha256": "e4af7775ed2bf8a315fe3518d17f5eda0741eb7ade909e5efd69042bdce0c7f7"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/AndroidCaptureRouting.swift",
+      "sha256": "2216d8d65d757b65c9bda7e47627a606b8ec4139e8f82ce7843eae3f353d8d63"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/CaptureBoundedLogWriter.swift",
+      "sha256": "03557cc7cf5afb7a5fda6686712ef1750f38535ce89d66c782c6eebe684c0731"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/CaptureCollectorWorker.swift",
+      "sha256": "cdbee130b1d4edb6dcde332119c69c7aa98f229bdb0c657681d3e4a9ca32de03"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/CaptureDevicePreparation.swift",
+      "sha256": "aae3346f4a6592244b75ea235f2b92981db5c87a2c09ee5f241cb2f98a0dd807"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/CaptureHostControl.swift",
+      "sha256": "fd9ddc6db147f4ec2db637db296c02fef838c143ee70f845eabdb5903ff8cfe0"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/CaptureHostProcesses.swift",
+      "sha256": "86bfb1904a2e38b9443b59534fae9c6bd70639343a3acc969c92268b8d9cb0d7"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/CaptureLifecycleFiles.swift",
+      "sha256": "4025c9b6c7007f404349e4e615e9596c04542dc08e720c29e50e06b3f17ef722"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/CaptureLifecycleModels.swift",
+      "sha256": "ea85e87c255f12b651cb77486c0a35c6abc1a3cf08e23d881181bff2a71a6a38"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/CaptureSaveCoordinator.swift",
+      "sha256": "f225996c3677a7cbe7be9543b2d1ce9aa77a41425adee92c116c9ae2889af467"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/NativeCaptureHost.swift",
+      "sha256": "40a93f6148cf87d1e77a0e3edddc83ce36d369de8c9a238d5a7be796a8a91868"
+    },
+    {
+      "path": "Sources/Core/CaptureLifecycle/NativeCaptureRouting.swift",
+      "sha256": "c6770e4d47d813e167c237ac33e3a240ae1261dbbdb21d152c3cf1cbd39de380"
+    },
+    {
+      "path": "Sources/Core/CaptureModels.swift",
+      "sha256": "11a5d6861c602d5c2518f9a4364ccda4db520987218a70d0917fe0c7cac24076"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureAndroidLogFilter.swift",
+      "sha256": "454ceea3edb36c4fc67b5ec86376d2effbc0db83ba7c263d6e5cc2d9c0c0f8c7"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureDeviceSetupProgress.swift",
+      "sha256": "6d6f16a53c000c008cbadc0129d861c0c5094d49319554d9157f4f4348221d30"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureDoctor.swift",
+      "sha256": "0c32711ae8e5061034c6cdc7cffab38d77844f411adb1492c1bd6abfafb53d5a"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureDoctorProcess.swift",
+      "sha256": "735ef145bae215ba0b5bce143e9716e2e40ca70a8216a1b387ffead361c88277"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureEvidenceExporter.swift",
+      "sha256": "8299540781b28f83f218223678f0af1c05904c1ea7f14c6cbca8397be7aa8153"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureEvidenceFiles.swift",
+      "sha256": "3a5b4818d5d917b0f43cd6c57f8f52942d30dbdf0004e69237074239646bc5a1"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureEvidenceReferences.swift",
+      "sha256": "090bf323537756fd465ca44e60235e929c11d56c45025173fc7984ba318bda4c"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureLogDiscovery.swift",
+      "sha256": "44193d8b92de88561ca6138a5674784632143de604261543555c480fc7ab08c6"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CapturePlan.swift",
+      "sha256": "db9bd0008817c45993d0e7629529ba12185ee8a09390840bf8ec2f200bde2425"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CapturePlanAssessment.swift",
+      "sha256": "bb38cc6b779614750303d8c2be8283f02d73d09d94ce8a090f3f5bcb2bd67d26"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CapturePlanJSON.swift",
+      "sha256": "a43c1e42f6bf5d08691b865f69731279a14f4a32756c94f32dda4bde1542a818"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureReadinessExport.swift",
+      "sha256": "e8f3840338a7e6acbf980078850bcffc5a4ccc183b5e3c8159a6a716eb64009b"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureRuntimeClient.swift",
+      "sha256": "e2d834fd80fbbc5a8f4f71dbfdca21f857ffcba15a618d9eb1bc76a6dc03f305"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureSessionRegistry.swift",
+      "sha256": "823021fc06f3c3cdec7f796961e1b5db2b32dbee54996182935c0ff0bffc12bc"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureSessionSetupContext.swift",
+      "sha256": "542ed088271aa7e850a4fafffb81c3852e2616e34336bcb442e41da0c9914c32"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureSetupLocalInspection.swift",
+      "sha256": "fcc39c731f98f815c1b9c3aedd6f7d27edc279d93e0540d89eb5bd82bb5357a5"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/CaptureSetupReadiness.swift",
+      "sha256": "e427cbfd41b61c0bca20d2a94b3d84493e9be80c02c72b4f86814dd0c5414922"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/IPhoneCaptureSetup.swift",
+      "sha256": "07e1ca3df8db576685dc7c89c74a99165898f9e0d15038338eee445cad5499f7"
+    },
+    {
+      "path": "Sources/Core/CaptureServices/NativeCaptureDiscovery.swift",
+      "sha256": "3fe7f46f5ed5979b82340ac8442c9c60849082efff7e44769769f75a7881fa5f"
+    },
+    {
+      "path": "Sources/Core/Shell/ShellRunner.swift",
+      "sha256": "7c6c453952a1aaa9cef5cd3729b0ab2e59af11017099223a87e92e747fd8b86d"
+    },
+    {
+      "path": "Sources/Core/Support.swift",
+      "sha256": "79c5bc009709e7b185d93bd03fc122b8c99f39746a778b7009ac376e84df83cf"
+    },
+    {
+      "path": "Sources/MobileCaptureApp/Info.plist",
+      "sha256": "6ef335d1208c99181efd7330802eeed37c5ba7090a858bc9cdaa3ee1d08a8d71"
+    },
+    {
+      "path": "Sources/MobileCaptureApp/MobileCapture.entitlements",
+      "sha256": "fa5d82a612df9adfa9e8bcea98a78842e589575fc48e5ab5939a04a93c3f6c2c"
+    },
+    {
+      "path": "Sources/MobileCaptureApp/MobileCaptureApplication.swift",
+      "sha256": "294a018b2d3672e17f76ecf4c19e807859c4766dafc2553b206370463f34eb19"
+    },
+    {
+      "path": "Sources/MobileCaptureApp/MobileCaptureSettingsView.swift",
+      "sha256": "d2131d15ae7631fc1433f2e13fd73034303d638c79d6a7e51f68277167e60645"
+    },
+    {
+      "path": "Sources/State/CaptureDoctorStore.swift",
+      "sha256": "229fb9ee360396bbacca5e39cdcd171dc0847d982af5947126afb11bbcae89a8"
+    },
+    {
+      "path": "Sources/State/CaptureSetupStore.swift",
+      "sha256": "ad0a69131118709e6b3976a04fc5278777a75cd12617297ca46ae6bfbc5d04e6"
+    },
+    {
+      "path": "Sources/State/CaptureStore.swift",
+      "sha256": "e1e1584dd7033ef143b629832c0baca5404485376531264b754e81f8593bb50d"
+    },
+    {
+      "path": "Sources/UI/CaptureCommands.swift",
+      "sha256": "03dd179730924ad7b28886a272c9ab33e05a430a5197ebf7cee4f73ba5c81f72"
+    },
+    {
+      "path": "Sources/UI/CaptureDoctorView.swift",
+      "sha256": "a0754cef1c90986997c770ad22752411ae0593c9af4ee5c7b34496081c3244a0"
+    },
+    {
+      "path": "Sources/UI/CaptureLogSettingsView.swift",
+      "sha256": "ba10a5f520c675bec3a47b60c6cfc9fa7f2602148297a1380538443bd150d22f"
+    },
+    {
+      "path": "Sources/UI/CaptureSetupView.swift",
+      "sha256": "27d15c4a143e30d53eb2775cd0d37a1505c23dc49a81b8875fe3c0a1a8e6fcb8"
+    },
+    {
+      "path": "Sources/UI/CaptureTimelineList.swift",
+      "sha256": "bff6b59ffc47af4ee3e8eb611736feaad738cf288d6e6fddb1a283958af9110e"
+    },
+    {
+      "path": "Sources/UI/CaptureView.swift",
+      "sha256": "7618a3ad63bc09aa85a56b4956164ca5ecf993e3c58be05ed4a5874944c4df75"
+    },
+    {
+      "path": "Sources/UI/IPhoneCaptureSetupView.swift",
+      "sha256": "151a2a2f67766a4c79c315f3f2e9a55bf27a1e37fdbbb0d571a2d5718b817475"
+    },
+    {
+      "path": "Sources/Windows/CaptureWindowController.swift",
+      "sha256": "a9449e0b505925a68cf0a02df0899af3562e1f0b5e4870f96d7b5de3d3d698a7"
+    },
+    {
+      "path": "Sources/Windows/ToolWindow.swift",
+      "sha256": "48c63ba893b814dafa86e10a52aa86bfb657d3e2b8843d6a0ba692b470462d04"
+    },
+    {
+      "path": "Tests/Capture/Fixtures/android/ProofActivity.java",
+      "sha256": "fc3afbd4d12fb07012cc207f55653e528ee76762ba900d8e7fdea5ea860ee620"
+    },
+    {
+      "path": "Tests/Capture/Fixtures/ios/ProofApp.swift",
+      "sha256": "b3be4fad023c41308263afdd4c6a154dd9077997a81a6f5da367f27d03fd5012"
+    },
+    {
+      "path": "Tests/Capture/test_evidence.py",
+      "sha256": "a87462333bc2887d2e932eb9eb57eff01ca0d63e7efe32c525a82cae3ee935d5"
+    },
+    {
+      "path": "Tests/Capture/test_iphone_capture_proof.py",
+      "sha256": "eb3a93c60754fdf6e56edbd7f8a1f0ec8915a41f04236adf1a94ea07627c7306"
+    },
+    {
+      "path": "Tests/Capture/test_runtime.py",
+      "sha256": "1685e06c0061cf5260266e77ac3c7e1c8f95a0cd6cb04ae06bf4564d27015adf"
+    },
+    {
+      "path": "Tests/Capture/test_setup_probe.py",
+      "sha256": "e96073923b2262346fd68e58af9c68a8e040cfa2d859bb220a5c0e5305d61afb"
+    },
+    {
+      "path": "Tests/CaptureBoundedLogWriterTests.swift",
+      "sha256": "9fcf8ad147dfdbd8f4cfdae44ae8041f2137a4f631d50f08a233d1e3d506e078"
+    },
+    {
+      "path": "Tests/CaptureCommandTargetTests.swift",
+      "sha256": "70774a2957892b6775c466caf1ff056dcb0bbb4eb65ba8031a7970bd02b03e0a"
+    },
+    {
+      "path": "Tests/CaptureDoctorBundleSmoke.swift",
+      "sha256": "bdd18db98bd6286e62490553c99249419a6312cd7d9c0661a7974973a2079368"
+    },
+    {
+      "path": "Tests/CaptureDoctorStoreTests.swift",
+      "sha256": "4c505bce2771cd84a9ff201f489c5acc6e4add8889e93877ea51e64d30928fe2"
+    },
+    {
+      "path": "Tests/CaptureDoctorTests.swift",
+      "sha256": "9b663f6b3881042bd3973e48d362738410406a61fa6f099226628941cc20b713"
+    },
+    {
+      "path": "Tests/CaptureHandoffTests.swift",
+      "sha256": "3f996ba5d64afab6adfab3e921999c297c07577b45af2a6428b71edf6cb4f205"
+    },
+    {
+      "path": "Tests/CaptureLogDiscoveryTests.swift",
+      "sha256": "8b99f826a53d07be930efd7c65308ee334888e8ba30b3c2c4a56230bbe2ea0a0"
+    },
+    {
+      "path": "Tests/CaptureLogWorkerTests.swift",
+      "sha256": "135ae08c9bd4a1a298a916a498a1939d5e42b96ab3fdfad9d4cb2d0a510c0c5f"
+    },
+    {
+      "path": "Tests/CapturePlanTests.swift",
+      "sha256": "ad8fa8a7ed8206cb44ad60dda89c6de13e7fa5e50e6654d47726621cb36ae3c3"
+    },
+    {
+      "path": "Tests/CaptureReadinessExportTests.swift",
+      "sha256": "aa08e400ebbbf7299004a07f571df79f80f0182217f1a9d0161aa3b42f844635"
+    },
+    {
+      "path": "Tests/CaptureSaveBenchmark.swift",
+      "sha256": "42b6f007653459efafe8c75bff1feeeb0444a4993fbb3ddbf426eea46b19e14f"
+    },
+    {
+      "path": "Tests/CaptureSaveBenchmarkFixture.py",
+      "sha256": "935da9a21db3328491431ac98336d55141167e4d4f745f650f092f2a3afcd142"
+    },
+    {
+      "path": "Tests/CaptureSaveCoordinatorTests.swift",
+      "sha256": "2074ebe4f17a8bc359b7edcd6eadf74552be8745540040ee57c94cf40f6dd74f"
+    },
+    {
+      "path": "Tests/CaptureSetupEvidenceTests.swift",
+      "sha256": "874200d81bb1e58aa1a17eb113a5811d0d33ab7e73cea996a5044f3a89075256"
+    },
+    {
+      "path": "Tests/CaptureSetupReadinessTests.swift",
+      "sha256": "997b581fef82c40669639b0663714cf146dc63104df8c7f1f862694d887df468"
+    },
+    {
+      "path": "Tests/CaptureSetupStoreTests.swift",
+      "sha256": "53a512c94af7e2b78a435c3a2418621c2b57b3ac165103f8ecdb4b07ece89c99"
+    },
+    {
+      "path": "Tests/CaptureTimelineListTests.swift",
+      "sha256": "2903bac326736f0191e15c09a08ecd088ba087c470ab8d092e3abe84f9e898a7"
+    },
+    {
+      "path": "Tests/CaptureTimelineTests.swift",
+      "sha256": "51bf4cc8da6fb6c358f1b34c0652edbb779a0778c146181c06c337fc0336d391"
+    },
+    {
+      "path": "Tests/CaptureUSBDiscoveryTests.swift",
+      "sha256": "9f27455e66a11fbaa99a11210c11b3afef52320ed4f23ea608b05708ca80d14c"
+    },
+    {
+      "path": "Tests/IPhoneCaptureSetupTests.swift",
+      "sha256": "654fe82ce4728b7ebcb2629355f12154b440f9172ede0ca661f93507e124fcb7"
+    },
+    {
+      "path": "Tests/NativeCaptureLifecycleTests.swift",
+      "sha256": "0f483b7ffce60d3c5f9d6643678f43fdba942b8c20e3d7b934e9d33a9e7b5cd2"
+    },
+    {
+      "path": "Tests/NativeCaptureServicesTests.swift",
+      "sha256": "89fc7ae51a125634a024ee5182709ab3222d27e3c69fbb7333603f1b43f3c5b7"
+    },
+    {
+      "path": "Tests/NativeTimelineTests.swift",
+      "sha256": "d9a0a9efc11aea493c478a1e11d03efe3b40a39ea3f47ff2e06e6b724d846aba"
+    },
+    {
+      "path": "docs/CAPTURE-DISTRIBUTION.md",
+      "sha256": "e76927c9b2766e35544a3e094e829c3b7808da9ad129901d856f3491becdeebc"
+    },
+    {
+      "path": "docs/CAPTURE-LOGGING-PLAN.md",
+      "sha256": "53681b728782b0a2f6983216469050cf2deb4aa495f506394347e3d6f54e46ce"
+    },
+    {
+      "path": "docs/CAPTURE-LOGGING-VALIDATION.md",
+      "sha256": "cb72f229eab0db867129019419033a78a43cd2dc538aeb2fc323ce55b5d788e0"
+    },
+    {
+      "path": "docs/CAPTURE-MCP-PLAN.md",
+      "sha256": "41e9cdab19d57af193bff59abc06c46f30454a59a5da6631cf91eaaef3400b48"
+    },
+    {
+      "path": "docs/CAPTURE-NATIVE-RUNTIME.md",
+      "sha256": "52881f0d9577f59ba290cef419d44bdb2993aaa27fade14da4e8d8d47a2b8a92"
+    },
+    {
+      "path": "docs/CAPTURE-PACKAGE.md",
+      "sha256": "e0260bde16af54bd2a2d4774ebf3bcf8b993f2ac02c1574e17bb8480d203e37d"
+    },
+    {
+      "path": "docs/CAPTURE-PROOF.md",
+      "sha256": "08643e47637980fea5aea3b5034fdb6a5f4cddfcfb47ad3ff1638a1837f30041"
+    },
+    {
+      "path": "docs/CAPTURE-PROTOTYPE-CONTRACT.md",
+      "sha256": "86dd6cfec31f9548a148358e8ad9347b91564c693dc60cd10787a9161e61d4f5"
+    },
+    {
+      "path": "docs/CAPTURE-SETUP-IMPLEMENTATION.md",
+      "sha256": "6cf50f0cf5888f4e00be0085aa54c0c56943db32dfba6129910d6e6f8bbb49b5"
+    },
+    {
+      "path": "docs/CAPTURE-SETUP-PLAN.md",
+      "sha256": "7cf613da98738b631ccd6d2ac5adbfc9647ca4ece11bdcbff2db8abbacb34d44"
+    },
+    {
+      "path": "docs/CAPTURE-STANDALONE-IMPLEMENTATION.md",
+      "sha256": "0964127de36cec5cdfd70347dacdefc83c0d1a5f43e4958a637ae9ace2738006"
+    },
+    {
+      "path": "docs/CAPTURE-STANDALONE-PLAN.md",
+      "sha256": "4c83f8fe5aceca0c55e0866c55467bd8523397c31f80879599459c02443062cd"
+    },
+    {
+      "path": "docs/CAPTURE.md",
+      "sha256": "35a1edf8e17ad5f57e18c65b9c2d17540c2572765d9c2320d439e63c2c5a5d7f"
+    },
+    {
+      "path": "docs/examples/CAPTURE-TASKS.md",
+      "sha256": "be5af4a1ddbeff1acc174d5181d139ccc00e29b1a67a6784bb77847ba7253c25"
+    },
+    {
+      "path": "docs/examples/capture-task.android.json",
+      "sha256": "2db16eec160acb0c9bf977cc7213fc581b4f14e876403864bc38ae87eeb149c2"
+    }
+  ]
+}
