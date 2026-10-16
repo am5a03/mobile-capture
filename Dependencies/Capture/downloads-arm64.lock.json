@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "dependencyLockSHA256": "99cf69ecfef2e5ff0755f76b8bcf9b39043da780023486581dc64471ee857038",
+  "archives": [
+    {
+      "name": "mitmproxy",
+      "url": "https://downloads.mitmproxy.org/12.2.3/mitmproxy-12.2.3-macos-arm64.tar.gz",
+      "sha256": "0a09ee3b82569e8985aff8186e4792618b8e5d0c766098db093d09a87d4b013a",
+      "filename": "mitmproxy-12.2.3-macos-arm64.tar.gz"
+    },
+    {
+      "name": "platform-tools",
+      "url": "https://dl.google.com/android/repository/platform-tools_r37.0.1-darwin.zip",
+      "sha256": "ee39ad5967e95c2a07f04dbcbde96b1a0c916ba376096db5d2f498b7727a5d1d",
+      "filename": "platform-tools_r37.0.1-darwin.zip"
+    }
+  ]
+}

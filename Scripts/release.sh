@@ -20,6 +20,14 @@ if (( USB_CANDIDATE )) && [[ "$MODE" != development ]]; then
 fi
 IDENTITY=-
 BUILD_OPTIONS=()
+if [[ -n "${CAPTURE_RELEASE_VERSION:-}" ]]; then
+  [[ "$CAPTURE_RELEASE_VERSION" =~ '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' ]] || { print -u2 "CAPTURE_RELEASE_VERSION must be MAJOR.MINOR.PATCH."; exit 2; }
+  BUILD_OPTIONS+=("MARKETING_VERSION=$CAPTURE_RELEASE_VERSION")
+fi
+if [[ -n "${CAPTURE_BUILD_NUMBER:-}" ]]; then
+  [[ "$CAPTURE_BUILD_NUMBER" =~ '^[1-9][0-9]*$' ]] || { print -u2 "CAPTURE_BUILD_NUMBER must be a positive integer."; exit 2; }
+  BUILD_OPTIONS+=("CURRENT_PROJECT_VERSION=$CAPTURE_BUILD_NUMBER")
+fi
 SCHEME=MobileCapture
 BUNDLE="Mobile Capture.app"
 ARTIFACT=MobileCapture
@@ -46,11 +54,12 @@ if ! xcodebuild -project MobileCapture.xcodeproj -scheme "$SCHEME" -configuratio
 fi
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$BUILD/$BUNDLE/Contents/Info.plist")
 STAMP=$(/bin/date -u +%Y%m%d-%H%M%S)
-DESTINATION="dist/$ARTIFACT-$VERSION-arm64-$MODE-$STAMP"
+DESTINATION=${CAPTURE_ARTIFACT_DIRECTORY:-"dist/$ARTIFACT-$VERSION-arm64-$MODE-$STAMP"}
+DESTINATION=${DESTINATION:A}
 [[ ! -e "$DESTINATION" ]] || { print -u2 "Artifact destination already exists: $DESTINATION"; exit 1; }
 mkdir -p "$DESTINATION"
 /usr/bin/ditto "$BUILD/$BUNDLE" "$DESTINATION/$BUNDLE"
-APP="$PWD/$DESTINATION/$BUNDLE"
+APP="$DESTINATION/$BUNDLE"
 /usr/bin/ditto LICENSE "$APP/Contents/Resources/PROJECT-LICENSE.txt"
 if [[ "$MODE" == release ]]; then
   /usr/libexec/PlistBuddy -c 'Set :MobileCaptureDevelopmentIdentity false' "$APP/Contents/Info.plist"
@@ -79,7 +88,9 @@ bash Scripts/test-capture-doctor-bundle.sh "$APP" "${DOCTOR_OPTIONS[@]}"
 ZIP="$ARTIFACT-$VERSION-arm64-$MODE.zip"
 (cd "$DESTINATION" && /usr/bin/ditto -c -k --keepParent "$BUNDLE" "$ZIP")
 if (( NOTARIZE )); then
-  xcrun notarytool submit "$DESTINATION/$ZIP" --keychain-profile "${NOTARY_PROFILE:-mobile-capture}" --wait
+  NOTARY_OPTIONS=(--keychain-profile "${NOTARY_PROFILE:-mobile-capture}")
+  if [[ -n "${NOTARY_KEYCHAIN:-}" ]]; then NOTARY_OPTIONS+=(--keychain "$NOTARY_KEYCHAIN"); fi
+  xcrun notarytool submit "$DESTINATION/$ZIP" "${NOTARY_OPTIONS[@]}" --wait
   xcrun stapler staple "$APP"
   /bin/rm "$DESTINATION/$ZIP"
   (cd "$DESTINATION" && /usr/bin/ditto -c -k --keepParent "$BUNDLE" "$ZIP")
