@@ -96,7 +96,9 @@ The lock was created by comparing the complete clean cached release extraction
 with the selected source bundle. Its executable was also compared by SHA256 to
 the already-approved installed executable before its version-only probe. A local
 snapshot pin is reproducibility evidence; it is not a new publisher attestation.
-The packager never downloads or silently upgrades dependencies.
+The Swift packager never downloads or silently upgrades dependencies. The optional
+`prepare-capture-cache.py` bootstrap downloads only the pinned official archives
+and passes their extracted inputs through the same payload verification.
 
 Only source code, metadata, locks and license text belong in Git. Dependency
 binaries, caches, built apps, CA stores and captures stay outside the repository.
@@ -111,6 +113,15 @@ license texts are included with the full Platform-Tools NOTICE. The packaged
 manifest lists the supplied notice files and their provenance. This inventories
 the frozen upstream payload and supplied notices; it does not claim a complete
 transitive dependency SBOM.
+
+## Automated GitHub downloads
+
+[Publish a downloadable release](RELEASES.md) describes the release workflow.
+It prepares an external cache from pinned official downloads, builds the complete
+app and attaches a verified ZIP and checksum to the published GitHub Release.
+Stable releases require Developer ID signing and notarization credentials.
+Development prereleases use explicit ad-hoc signing. The local packaging script
+still only prepares files; the GitHub workflow owns the asset upload.
 
 ## Prepare the external cache
 

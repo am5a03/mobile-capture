@@ -25,6 +25,7 @@ case "${1:-all}" in
     ;;
   python)
     python3 -B -m unittest discover -s Tests/Capture -p 'test_*.py' -v
+    python3 -B -m unittest discover -s Tests/Release -p 'test_*.py' -v
     ;;
   all)
     for group in core services timeline python; do bash Scripts/test-all.sh "$group"; done
