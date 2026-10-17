@@ -100,8 +100,9 @@ Never remove quarantine, disable Gatekeeper, or re-sign the app to get past a
 failure. Development consent does not bypass macOS approval.
 
 An identical repeat installation is safe. A conflicting destination is rejected
-rather than overwritten. Before an upgrade, ask the user to finish or recover any
-active recording in the app that owns it. Preserve existing copies and their data.
+rather than overwritten. Keep any copy that owns an active or recoverable
+recording. Finish or recover that session in its owning app before starting a
+capture in another version. Installation does not interrupt or migrate it.
 
 Completion criterion: record the installer exit and app path. Exit `20` is an
 installed app awaiting human approval, not permission to run a blocked binary.
@@ -132,6 +133,10 @@ and storage. It does not discover or pair phones, start capture, install tools,
 apply repairs, modify trust, or change routing. Report repair suggestions to the
 user as proposals. A physical iPhone can report missing external USB tools even
 when the complete app is installed. Simulator checks can report missing Xcode.
+Some Xcode versions provide a `simctl` shell launcher that can perform first-run
+setup. Doctor locates the selected tool but does not execute that launcher; it
+can report incompatible even with Xcode installed. Hand this result to an engineer
+instead of installing or rewriting tools automatically.
 
 | Doctor exit | Meaning |
 | --- | --- |
@@ -193,6 +198,9 @@ a successful Mac check or a successful phone setup.
   inspection. Do not steal a lock from another installer.
 - If Doctor suggests a reinstall, use a complete trusted app release. Installing
   Homebrew or Python does not repair a damaged bundled component.
+- If an agent sandbox restricts a launch or storage probe, report that restriction.
+  Recheck with permitted read-only host execution before concluding tools or disk
+  space are missing. Keep macOS protections enabled.
 - If storage needs action, choose an existing private writable local folder with
   at least 512 MB free and rerun Doctor with `--output-directory`.
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Exercise the installer in private fixtures, using the actual macOS extractor."""
 import argparse
 import hashlib
 import json

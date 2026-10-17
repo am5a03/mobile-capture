@@ -89,7 +89,7 @@ jobs:
           if [[ "$RELEASE_MODE" == development ]]; then
             cat >> "$RUNNER_TEMP/release-notes.md" <<'NOTES'
 
-          **Development beta: ad-hoc signed and not notarized.** Install only if you trust this project and explicitly accept development builds. macOS can block execution; the installer reports a manual approval handoff and never bypasses Gatekeeper. This beta is for setup testing. Fresh-Mac and full device acceptance remain outstanding.
+          **Development beta: ad-hoc signed and not notarized.** Install only if you trust this project and explicitly accept development builds. macOS can block execution; the installer reports a manual approval handoff and never bypasses Gatekeeper. This beta is for setup testing. Simulator Doctor can report an installed Xcode shell launcher as incompatible; the read-only check never runs first-launch setup. Fresh-Mac and full device acceptance remain outstanding.
           NOTES
           fi
       - name: Publish the release with its verified app and setup assets
