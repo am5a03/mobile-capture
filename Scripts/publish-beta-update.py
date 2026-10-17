@@ -80,7 +80,8 @@ def parse_feed(data, config):
         build = build_number(item.findtext(f"{{{SPARKLE}}}version"))
         digest = item.findtext(f"{{{CAPTURE}}}sha256", "")
         commit = item.findtext(f"{{{CAPTURE}}}releaseCommit", "")
-        if version != beta_version(tag) or item.findtext(f"{{{SPARKLE}}}channel") != config["channel"] or not re.fullmatch(r"[0-9a-f]{64}", digest) or not SHA.fullmatch(commit):
+        beta_version(tag)
+        if version != tag[1:] or item.findtext(f"{{{SPARKLE}}}channel") != config["channel"] or not re.fullmatch(r"[0-9a-f]{64}", digest) or not SHA.fullmatch(commit):
             raise ValueError("Invalid beta appcast item")
         url = f"https://github.com/{repository(config)}/releases/download/{tag}/{ASSET}"
         if enclosure is None or enclosure.get("url") != url or not re.fullmatch(r"[1-9][0-9]*", enclosure.get("length", "")) or len(base64.b64decode(enclosure.get(f"{{{SPARKLE}}}edSignature", ""), validate=True)) != 64:
@@ -199,7 +200,7 @@ def make_feed(previous, candidate, info, signature, notes, config):
         ET.SubElement(channel, "description").text = "Internal development betas. Ad-hoc signed and not notarized."
     channel = tree.find("channel")
     item = ET.Element("item")
-    values = {"title": candidate["tag"], f"{{{SPARKLE}}}version": str(candidate["build"]), f"{{{SPARKLE}}}shortVersionString": beta_version(candidate["tag"]), f"{{{SPARKLE}}}channel": config["channel"], f"{{{SPARKLE}}}minimumSystemVersion": info["LSMinimumSystemVersion"], f"{{{CAPTURE}}}releaseTag": candidate["tag"], f"{{{CAPTURE}}}releaseCommit": candidate["commit"], f"{{{CAPTURE}}}sha256": candidate["sha256"], "description": notes, "pubDate": datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")}
+    values = {"title": candidate["tag"], f"{{{SPARKLE}}}version": str(candidate["build"]), f"{{{SPARKLE}}}shortVersionString": candidate["tag"][1:], f"{{{SPARKLE}}}channel": config["channel"], f"{{{SPARKLE}}}minimumSystemVersion": info["LSMinimumSystemVersion"], f"{{{CAPTURE}}}releaseTag": candidate["tag"], f"{{{CAPTURE}}}releaseCommit": candidate["commit"], f"{{{CAPTURE}}}sha256": candidate["sha256"], "description": notes, "pubDate": datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S GMT")}
     for key, value in values.items():
         ET.SubElement(item, key).text = value
     ET.SubElement(item, "enclosure", {"url": candidate["url"], "length": str(candidate["length"]), "type": "application/octet-stream", f"{{{SPARKLE}}}edSignature": signature})
@@ -261,8 +262,8 @@ def prepare(args, config):
     print("Prepared verified public metadata in " + str(args.output))
 
 
-def verify_public(config, expected, destination):
-    download(config["feedURL"] + "?capture_commit=" + expected, destination, 2_097_152)
+def verify_public(config, destination):
+    download(config["feedURL"], destination, 2_097_152)
     data = destination.read_bytes()
     verify_feed(data, config)
     return data
@@ -285,31 +286,31 @@ def publish(args, config):
         item = next(item for item in items if item["tag"] == candidate["tag"])
         verify_signature(temporary / ASSET, item["signature"], config)
         current = feed_head(config)
-        if current != record["expectedFeedSHA"]:
-            existing = existing_feed(config, current)
-            if existing != feed:
-                raise ValueError("Feed changed before publication. Prepare again")
+        existing = existing_feed(config, current)
+        if existing == feed:
             head = current
         else:
-            existing = existing_feed(config, current)
-            if existing == feed:
-                head = current
+            if current != record["expectedFeedSHA"]:
+                raise ValueError("Feed changed before publication. Prepare again")
+            if existing and reconcile(verify_feed(existing, config)[1], candidate):
+                raise ValueError("Candidate is already published in a different feed. Refusing replay or rollback")
+            prefix = f"repos/{repository(config)}/git"
+            blob = gh("POST", prefix + "/blobs", {"content": base64.b64encode(feed).decode("ascii"), "encoding": "base64"})
+            tree = {"tree": [{"path": config["feedPath"], "mode": "100644", "type": "blob", "sha": blob["sha"]}]}
+            if current != "absent":
+                tree["base_tree"] = gh("GET", prefix + "/commits/" + current)["tree"]["sha"]
+            tree_sha = gh("POST", prefix + "/trees", tree)["sha"]
+            head = gh("POST", prefix + "/commits", {"message": "Publish beta update " + candidate["tag"], "tree": tree_sha, "parents": [] if current == "absent" else [current]})["sha"]
+            if feed_head(config) != current:
+                raise ValueError("Feed changed while creating metadata. Nothing was published")
+            if current == "absent":
+                gh("POST", prefix + "/refs", {"ref": "refs/heads/" + config["feedBranch"], "sha": head})
             else:
-                prefix = f"repos/{repository(config)}/git"
-                blob = gh("POST", prefix + "/blobs", {"content": base64.b64encode(feed).decode("ascii"), "encoding": "base64"})
-                tree = {"tree": [{"path": config["feedPath"], "mode": "100644", "type": "blob", "sha": blob["sha"]}]}
-                if current != "absent":
-                    tree["base_tree"] = gh("GET", prefix + "/commits/" + current)["tree"]["sha"]
-                tree_sha = gh("POST", prefix + "/trees", tree)["sha"]
-                head = gh("POST", prefix + "/commits", {"message": "Publish beta update " + candidate["tag"], "tree": tree_sha, "parents": [] if current == "absent" else [current]})["sha"]
-                if feed_head(config) != current:
-                    raise ValueError("Feed changed while creating metadata. Nothing was published")
-                if current == "absent":
-                    gh("POST", prefix + "/refs", {"ref": "refs/heads/" + config["feedBranch"], "sha": head})
-                else:
-                    gh("PATCH", prefix + "/refs/heads/" + config["feedBranch"], {"sha": head, "force": False})
-        if feed_head(config) != head or verify_public(config, head, temporary / "public-appcast.xml") != feed:
-            raise ValueError("Public feed response differs from the verified publication. Retry verification")
+                gh("PATCH", prefix + "/refs/heads/" + config["feedBranch"], {"sha": head, "force": False})
+        if feed_head(config) != head:
+            raise ValueError("Feed changed after publication. Prepare again")
+        if verify_public(config, temporary / "public-appcast.xml") != feed:
+            raise ValueError("Public feed response differs from the verified publication. Public verification is pending. The configured URL may be cached. Retry the same publish command")
     print("Published and verified signed beta feed at " + head)
 
 

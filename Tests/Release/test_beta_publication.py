@@ -85,8 +85,9 @@ if args[1] == "generate" {
 
     def test_signed_feed_and_archive_are_verified_with_public_key_only(self):
         data = self.signed_feed()
-        _, items = publication.verify_feed(data, self.config)
+        tree, items = publication.verify_feed(data, self.config)
         self.assertEqual(items[0]["build"], 2001)
+        self.assertEqual(tree.findtext(f"channel/item/{{{publication.SPARKLE}}}shortVersionString"), "0.1.2-beta.1")
         publication.verify_signature(self.archive, items[0]["signature"], self.config)
         self.archive.write_bytes(b"modified archive")
         with self.assertRaises(subprocess.CalledProcessError):
@@ -117,7 +118,7 @@ if args[1] == "generate" {
 
     def test_feed_url_version_order_and_channel_are_validated(self):
         content = publication.unsigned_feed(self.signed_feed())[0]
-        for changed in (content.replace(b"/v0.1.2-beta.1/", b"/latest/"), content.replace(b">2001<", b">0<"), content.replace(b">beta<", b">stable<"), content.replace(b">0.1.2<", b">0.1.1<")):
+        for changed in (content.replace(b"/v0.1.2-beta.1/", b"/latest/"), content.replace(b">2001<", b">0<"), content.replace(b">beta<", b">stable<"), content.replace(b">0.1.2-beta.1<", b">0.1.2<"), content.replace(b">0.1.2-beta.1<", b">0.1.2-beta.2<")):
             with self.subTest(changed=changed[:20]), self.assertRaises(ValueError):
                 publication.parse_feed(changed, self.config)
         tree, _ = publication.parse_feed(content, self.config)
@@ -180,6 +181,8 @@ if args[1] == "generate" {
 
     def test_publish_uses_expected_parent_nonforce_and_verifies_public_bytes(self):
         feed = self.prepared()
+        older = dict(self.candidate, tag="v0.1.1-beta.1", build=1001, url=self.candidate["url"].replace("v0.1.2-beta.1", "v0.1.1-beta.1"))
+        previous = self.signed_feed(older)
         calls = []
         def api(method, endpoint, payload=None, **kwargs):
             calls.append((method, endpoint, payload))
@@ -195,7 +198,7 @@ if args[1] == "generate" {
             self.assertEqual(method, "PATCH")
             self.assertEqual(payload, {"sha": "c" * 40, "force": False})
             return {}
-        with patch.object(publication, "fetch_release", side_effect=self.fake_release), patch.object(publication, "feed_head", side_effect=["b" * 40, "b" * 40, "c" * 40]), patch.object(publication, "existing_feed", return_value=None), patch.object(publication, "gh", side_effect=api), patch.object(publication, "verify_public", return_value=feed) as public:
+        with patch.object(publication, "fetch_release", side_effect=self.fake_release), patch.object(publication, "feed_head", side_effect=["b" * 40, "b" * 40, "c" * 40]), patch.object(publication, "existing_feed", return_value=previous), patch.object(publication, "gh", side_effect=api), patch.object(publication, "verify_public", return_value=feed) as public:
             publication.publish(SimpleNamespace(prepared=self.root), self.config)
             public.assert_called_once()
         self.assertEqual([call[0] for call in calls], ["POST", "GET", "POST", "POST", "PATCH"])
@@ -209,6 +212,55 @@ if args[1] == "generate" {
             with self.assertRaisesRegex(ValueError, "Public feed response"):
                 publication.publish(SimpleNamespace(prepared=self.root), self.config)
             api.assert_not_called()
+
+    def test_stale_configured_feed_stays_pending_and_retry_never_rewrites(self):
+        feed = self.prepared()
+        older = dict(self.candidate, tag="v0.1.1-beta.1", build=1001, url=self.candidate["url"].replace("v0.1.2-beta.1", "v0.1.1-beta.1"))
+        public_feed = self.signed_feed(older)
+        urls = []
+        def downloaded(url, path, maximum):
+            urls.append(url)
+            path.write_bytes(public_feed if url == self.config["feedURL"] else feed)
+        with patch.object(publication, "fetch_release", side_effect=self.fake_release), patch.object(publication, "feed_head", return_value="c" * 40), patch.object(publication, "existing_feed", return_value=feed), patch.object(publication, "gh") as api, patch.object(publication, "download", side_effect=downloaded):
+            with self.assertRaisesRegex(ValueError, "verification is pending"):
+                publication.publish(SimpleNamespace(prepared=self.root), self.config)
+            self.assertEqual(urls, [self.config["feedURL"]])
+            api.assert_not_called()
+            public_feed = feed
+            publication.publish(SimpleNamespace(prepared=self.root), self.config)
+            self.assertEqual(urls, [self.config["feedURL"], self.config["feedURL"]])
+            api.assert_not_called()
+
+    def test_old_signed_feed_cannot_replay_with_an_edited_expected_head(self):
+        old_feed = self.prepared()
+        newer = dict(self.candidate, tag="v0.1.3-beta.1", build=2002, url=self.candidate["url"].replace("v0.1.2-beta.1", "v0.1.3-beta.1"))
+        current_feed = self.signed_feed(newer, old_feed)
+        record_path = self.root / "publication.json"
+        record = json.loads(record_path.read_text())
+        record["expectedFeedSHA"] = "c" * 40
+        record_path.write_text(json.dumps(record))
+        def api(method, endpoint, payload=None, **kwargs):
+            self.assertEqual(method, "GET", "A signed feed replay must fail before any GitHub mutation")
+            self.assertTrue(endpoint.endswith("?ref=" + "c" * 40))
+            return {"content": base64.b64encode(current_feed).decode("ascii")}
+        with patch.object(publication, "fetch_release", side_effect=self.fake_release), patch.object(publication, "feed_head", return_value="c" * 40), patch.object(publication, "gh", side_effect=api) as requests:
+            with self.assertRaisesRegex(ValueError, "already published.*different feed"):
+                publication.publish(SimpleNamespace(prepared=self.root), self.config)
+            self.assertEqual([call.args[0] for call in requests.call_args_list], ["GET"])
+
+    def test_new_candidate_must_advance_the_current_published_build_and_tag(self):
+        self.prepared(expected="c" * 40)
+        for build, error in ((2002, "strictly increase"), (2000, "tag must advance")):
+            with self.subTest(current_build=build):
+                newer = dict(self.candidate, tag="v0.1.3-beta.1", build=build, url=self.candidate["url"].replace("v0.1.2-beta.1", "v0.1.3-beta.1"))
+                current_feed = self.signed_feed(newer)
+                def api(method, endpoint, payload=None, **kwargs):
+                    self.assertEqual(method, "GET", "A non-increasing candidate must fail before any GitHub mutation")
+                    return {"content": base64.b64encode(current_feed).decode("ascii")}
+                with patch.object(publication, "fetch_release", side_effect=self.fake_release), patch.object(publication, "feed_head", return_value="c" * 40), patch.object(publication, "gh", side_effect=api) as requests:
+                    with self.assertRaisesRegex(ValueError, error):
+                        publication.publish(SimpleNamespace(prepared=self.root), self.config)
+                    self.assertEqual([call.args[0] for call in requests.call_args_list], ["GET"])
 
     def test_prepare_signs_the_final_public_archive_and_feed_with_account_only(self):
         info = {"CFBundleShortVersionString": "0.1.2", "CFBundleVersion": "2001", "CFBundleIdentifier": self.config["bundleIdentifier"], "CFBundleExecutable": "Mobile Capture", "MobileCaptureDevelopmentIdentity": True, "LSMinimumSystemVersion": "26.0"}
@@ -256,7 +308,10 @@ if args[1] == "generate" {
         self.assertEqual(record["candidate"]["build"], 2001)
         self.assertEqual(record["expectedFeedSHA"], "absent")
         self.assertEqual(len(signing_calls), 3)
-        self.assertEqual(publication.verify_feed((output / "appcast.xml").read_bytes(), self.config)[1][0]["sha256"], beta.sha256(self.archive))
+        tree, items = publication.verify_feed((output / "appcast.xml").read_bytes(), self.config)
+        self.assertEqual(items[0]["sha256"], beta.sha256(self.archive))
+        self.assertEqual(tree.findtext(f"channel/item/{{{publication.SPARKLE}}}shortVersionString"), "0.1.2-beta.1")
+        self.assertEqual(beta.archive_info(output / publication.ASSET, self.config, self.candidate["tag"])["CFBundleShortVersionString"], "0.1.2")
 
     def test_race_during_commit_creation_fails_without_updating_ref(self):
         self.prepared()

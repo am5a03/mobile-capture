@@ -18,7 +18,9 @@ signed public appcast. A successful Actions run alone does not advertise an upda
 4. Record the tag's exact source commit and the current feed branch commit.
 
 The workflow enables beta updates only for `vMAJOR.MINOR.PATCH-beta.N` tags.
-The app's numeric version matches the tag. Its build number is
+The app's `CFBundleShortVersionString` is numeric, such as `0.1.2`.
+The appcast's `sparkle:shortVersionString` displays the full beta version without
+the leading `v`, such as `0.1.2-beta.1`. Its `sparkle:version` is the app's build number,
 `github.run_number * 1000 + github.run_attempt`, with attempts limited to 1 through 999
 and the result limited to 2147483647. New feed entries must have a larger build and a later beta tag
 than every existing entry. Alpha, release candidate, stable, and ordinary local
@@ -74,13 +76,19 @@ python3 -B Scripts/publish-beta-update.py publish \
 Publication rechecks the final public archive and tag. It publishes the signed
 appcast to the policy's feed branch using the observed parent commit and a
 non-forced reference update. A competing publication fails without replacing it.
-The command then reads the actual public HTTPS feed and verifies its signature
-and exact bytes. If the public response has not caught up, retry the same command.
-A successful retry makes no new commit.
+The command then reads the exact configured public HTTPS feed URL used by the app
+and verifies its signature and bytes. GitHub's public cache may delay that URL
+after the branch changes. A fresh response at a URL with a different query string
+does not verify the app's feed. If the response has not caught up, publication
+verification remains pending and the command fails. Wait for the cache to update,
+then retry the same command and prepared directory. An identical signed feed
+makes no new commit on retry.
 
-An identical tag, build, source commit, and archive digest is idempotent. A reused
-tag with different bytes or a non-increasing build is rejected. Publish a new
-beta tag for a changed app. Do not move a published tag or replace its archive.
+Publication also verifies the current branch's signed feed before any write.
+The candidate must advance its highest build and latest beta tag. If the candidate
+already exists, only an exact match of the complete signed feed bytes is idempotent.
+Changing the local expected commit cannot authorize replay of an older signed feed.
+Publish a new beta tag for a changed app. Do not move a published tag or replace its archive.
 
 ## Verify the installed update
 
