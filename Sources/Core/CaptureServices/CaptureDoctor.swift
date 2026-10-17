@@ -66,6 +66,7 @@ nonisolated struct CaptureDoctorService: Sendable {
     var runner: any CaptureDoctorCommandRunning = CaptureDoctorProcessRunner()
     var homeDirectory = FileManager.default.homeDirectoryForCurrentUser
     var trustedExternalRoots: [URL] = [URL(fileURLWithPath: "/opt/homebrew"), URL(fileURLWithPath: "/usr/local")]
+    var trustedSystemRoots: [URL] = [URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/Library/Developer")]
     var architecture = Self.hostArchitecture
     var now: @Sendable () -> Date = { Date() }
     var availableDiskBytes: (@Sendable (URL) -> Int64?)? = nil
@@ -245,7 +246,7 @@ nonisolated struct CaptureDoctorService: Sendable {
         }
         else if bundledExists { path = bundled; source = .bundled }
         else if applicationBundle != nil && definition.repair == .reinstallApp { path = nil; source = .bundled }
-        else { path = externalTool(definition.name, request: request); source = path == nil ? .none : definition.name == "simctl" ? .system : .external }
+        else { path = await externalTool(definition.name, request: request); source = path == nil ? .none : definition.name == "simctl" ? .system : .external }
         func row(_ status: CaptureDoctorStatus, _ message: String, version: String? = nil) -> CaptureDoctorCheck {
             CaptureDoctorCheck(id: definition.name, title: definition.title, status: status, message: message,
                 version: version, path: path?.path ?? bundled?.path, source: source,
@@ -314,7 +315,21 @@ nonisolated struct CaptureDoctorService: Sendable {
         return applicationBundle.appendingPathComponent(suffix)
     }
 
-    private func externalTool(_ name: String, request: CaptureDoctorRequest) -> URL? {
+    private func externalTool(_ name: String, request: CaptureDoctorRequest) async -> URL? {
+        if name == "simctl" {
+            if let explicit = request.tools[name], explicit.hasPrefix("/"),
+               FileManager.default.isExecutableFile(atPath: explicit) { return URL(fileURLWithPath: explicit) }
+            guard let result = try? await runner.run(CaptureDoctorCommand(executable: URL(fileURLWithPath: "/usr/bin/xcode-select"),
+                arguments: ["--print-path"], environment: commandEnvironment, timeoutSeconds: 5, maximumOutputBytes: 4_096), progress: { _ in }),
+                  result.exitCode == 0, !result.outputTruncated, result.stderr.trimmed.isEmpty else { return nil }
+            let selection = result.stdout.trimmingCharacters(in: .newlines)
+            guard selection.hasPrefix("/"), result.stdout == selection || result.stdout == selection + "\n",
+                  !selection.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return nil }
+            var developer = URL(fileURLWithPath: selection)
+            if developer.pathExtension == "app" { developer.appendPathComponent("Contents/Developer") }
+            let candidate = developer.appendingPathComponent("usr/bin/simctl")
+            return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
+        }
         let candidates = request.tools[name].map { [$0] } ?? []
         let defaults = trustedExternalRoots.map { $0.appendingPathComponent("bin/" + name).path }
         let android = name == "adb" ? [homeDirectory.appendingPathComponent("Library/Android/sdk/platform-tools/adb").path] : []
@@ -335,7 +350,7 @@ nonisolated struct CaptureDoctorService: Sendable {
               info.st_mode & 0o022 == 0, [0, geteuid()].contains(info.st_uid),
               FileManager.default.isExecutableFile(atPath: resolved.path) else { return false }
         let roots: [URL] = if source == .bundled { applicationBundle.map { [$0] } ?? [] }
-        else if source == .system { [URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/Library/Developer")] }
+        else if source == .system { trustedSystemRoots }
         else { trustedExternalRoots + [homeDirectory.appendingPathComponent("Library/Android/sdk/platform-tools")] }
         guard let root = roots.map({ $0.standardizedFileURL.resolvingSymlinksInPath() })
             .first(where: { resolved.path.hasPrefix($0.path + "/") }) else { return false }

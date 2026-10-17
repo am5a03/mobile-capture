@@ -15,6 +15,8 @@ private actor DoctorFixtureRunner: CaptureDoctorCommandRunning {
     var engineHelpExit: Int32 = 0
     var engineHelpError = ""
     var engineHelpHasHeader = true
+    var fileOutput: String? = nil
+    var developerSelection = CaptureDoctorCommandResult(exitCode: 1, stdout: "", stderr: "No developer tools selected")
 
     func configure(version: String? = nil, capability: String? = nil, architecture: Bool = false, signature: Bool = false,
                    offered: String = "1.4.0", installExit: Int32 = 0, installHook: (@Sendable () throws -> Void)? = nil,
@@ -24,12 +26,18 @@ private actor DoctorFixtureRunner: CaptureDoctorCommandRunning {
         self.engineHelpExit = engineHelpExit; self.engineHelpError = engineHelpError; self.engineHelpHasHeader = engineHelpHasHeader
     }
 
+    func configureDeveloperSelection(_ output: String, exitCode: Int32 = 0, truncated: Bool = false, fileOutput: String? = nil) {
+        self.fileOutput = fileOutput
+        developerSelection = .init(exitCode: exitCode, stdout: output, stderr: "", outputTruncated: truncated)
+    }
+
     func run(_ command: CaptureDoctorCommand, progress: @escaping @Sendable (String) -> Void) async throws -> CaptureDoctorCommandResult {
         commands.append(command)
         let name = command.executable.lastPathComponent
         func output(_ text: String, _ code: Int32 = 0) -> CaptureDoctorCommandResult { .init(exitCode: code, stdout: text, stderr: "") }
         if name == "codesign" { return output("", badSignature ? 1 : 0) }
-        if name == "file" { return output(badArchitecture ? "Mach-O 64-bit executable ppc" : "Mach-O universal binary with 2 architectures: [x86_64:Mach-O 64-bit executable x86_64] [arm64:Mach-O 64-bit executable arm64]") }
+        if name == "xcode-select" { return developerSelection }
+        if name == "file" { return output(fileOutput ?? (badArchitecture ? "Mach-O 64-bit executable ppc" : "Mach-O universal binary with 2 architectures: [x86_64:Mach-O 64-bit executable x86_64] [arm64:Mach-O 64-bit executable arm64]")) }
         if name == "brew", command.arguments.first == "info" {
             let version = command.arguments.last == "ideviceinstaller" ? "1.2.0" : offeredVersion
             let formula: [String: Any] = ["name": command.arguments.last ?? "", "tap": "homebrew/core",
@@ -238,6 +246,74 @@ struct CaptureDoctorTests {
             capability: failure == "capability" ? "mitmdump" : nil, architecture: failure == "architecture")
         let report = await fixture.service(runner).inspect(fixture.request())
         #expect(report.rows.contains { $0.id == "mitmdump" && $0.status == .incompatible && $0.repair == .reinstallApp })
+    }
+
+    @Test(arguments: [false, true])
+    func simulatorResolvesSelectedXcodeWithoutDiscovery(selectApp: Bool) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("Xcode.app/Contents/Developer/usr/bin/simctl", bundled: false)
+        let developer = fixture.external.appendingPathComponent("Xcode.app/Contents/Developer")
+        let runner = DoctorFixtureRunner()
+        await runner.configureDeveloperSelection((selectApp ? developer.deletingLastPathComponent().deletingLastPathComponent() : developer).path + "\n")
+        var service = fixture.service(runner); service.trustedSystemRoots = [fixture.external]
+        let report = await service.inspect(fixture.request("simulator", logs: true, network: false))
+        #expect(report.isReady && report.rows.contains { $0.id == "simctl" && $0.source == .system && $0.path == developer.appendingPathComponent("usr/bin/simctl").path })
+        let commands = await runner.commands
+        #expect(commands.map(\.executable.lastPathComponent) == ["xcode-select", "file", "simctl"])
+        let selection = try #require(commands.first)
+        #expect(selection.arguments == ["--print-path"] && selection.timeoutSeconds == 5 && selection.maximumOutputBytes == 4_096)
+        #expect(selection.environment["DEVELOPER_DIR"] == nil)
+        #expect(commands.last?.arguments == ["help"])
+    }
+
+    @Test(arguments: ["unselected", "relative", "multiline", "nul", "blank", "truncated", "unsafe", "missing"])
+    func simulatorRejectsUnavailableOrMalformedDeveloperSelection(failure: String) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("Xcode.app/Contents/Developer/usr/bin/simctl", bundled: false)
+        let developer = fixture.external.appendingPathComponent("Xcode.app/Contents/Developer")
+        let runner = DoctorFixtureRunner()
+        let selection: String = switch failure {
+        case "relative": "relative/Xcode.app\n"
+        case "multiline": developer.path + "\n/Applications/Other.app\n"
+        case "nul": developer.path + "\0\n"
+        case "blank": "\n"
+        case "missing": fixture.external.appendingPathComponent("Missing.app/Contents/Developer").path + "\n"
+        default: developer.path + "\n"
+        }
+        await runner.configureDeveloperSelection(selection, exitCode: failure == "unselected" ? 1 : 0, truncated: failure == "truncated")
+        var service = fixture.service(runner)
+        if failure != "unsafe" { service.trustedSystemRoots = [fixture.external] }
+        let report = await service.inspect(fixture.request("simulator", logs: true, network: false))
+        #expect(!report.isReady && report.rows.contains { $0.id == "simctl" && $0.status == (failure == "unsafe" ? .incompatible : .missing) })
+        #expect((await runner.commands).map(\.executable.lastPathComponent) == ["xcode-select"])
+    }
+
+    @Test func selectedSimulatorScriptIsLocatedButNeverExecuted() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("Xcode.app/Contents/Developer/usr/bin/simctl", bundled: false)
+        let developer = fixture.external.appendingPathComponent("Xcode.app/Contents/Developer")
+        let runner = DoctorFixtureRunner()
+        await runner.configureDeveloperSelection(developer.path + "\n", fileOutput: "Bourne-Again shell script text executable, ASCII text\n")
+        var service = fixture.service(runner); service.trustedSystemRoots = [fixture.external]
+        let report = await service.inspect(fixture.request("simulator", logs: true, network: false))
+        #expect(report.rows.contains { $0.id == "simctl" && $0.status == .incompatible && $0.path == developer.appendingPathComponent("usr/bin/simctl").path })
+        #expect((await runner.commands).map(\.executable.lastPathComponent) == ["xcode-select", "file"])
+    }
+
+    @Test(arguments: [false, true])
+    func explicitSimulatorPathTakesPrecedenceWithoutResolvingSelection(override: Bool) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("Xcode.app/Contents/Developer/usr/bin/simctl", bundled: false)
+        let simulator = fixture.external.appendingPathComponent("Xcode.app/Contents/Developer/usr/bin/simctl")
+        var request = fixture.request("simulator", logs: true, network: false)
+        if override { request.toolOverrides = ["simctl": simulator.path] }
+        else { request.tools = ["simctl": simulator.path] }
+        let runner = DoctorFixtureRunner()
+        var service = fixture.service(runner)
+        service.trustedSystemRoots = [fixture.external]
+        let report = await service.inspect(request)
+        #expect(report.isReady)
+        #expect(!(await runner.commands).contains { $0.executable.lastPathComponent == "xcode-select" })
     }
 
     @Test func optionalBrewIsGuidanceWhenMissingAndPreviewDoesNotInstall() async throws {
