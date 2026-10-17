@@ -1,0 +1,3 @@
+ts	phase	decision	why	evidence	result
+2026-10-17T04:31:04Z	frame	Implement guide, installer and JSON Doctor; publish first development beta	User explicitly authorized implementation, checkpoint commits and first beta publication	origin/main@25d83f40b64f46ed50fdf53db48cbc884473877a	open
+2026-10-17T04:36:53Z	design	Choose stock-shell exact-tag side-by-side installer and existing host Doctor	A scored 25/25 vs B 21/25; manifest repeats release metadata; graft B sources and exact version	/tmp/mobile-capture-setup-design/{a,b}/design.md; judgment.md; .audit/agent-setup-design.md	accepted
