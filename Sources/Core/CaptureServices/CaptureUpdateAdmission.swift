@@ -19,7 +19,7 @@ final class CaptureUpdateAdmission {
     enum State { case available, checking, installationCommitted }
     private(set) var state = State.available
     private(set) var pendingVersion: String?
-    @ObservationIgnored private var lease: CaptureUpdateOwnershipLease?
+    @ObservationIgnored private var lease: CaptureReadOnlyRoutingLock?
 
     var allowsCaptureWork: Bool { state == .available }
 
@@ -27,7 +27,7 @@ final class CaptureUpdateAdmission {
         guard allowsCaptureWork else { throw CaptureUpdateBlocker.updating }
         if let blocker { throw blocker }
         guard !otherInstance else { throw CaptureUpdateBlocker.otherInstance }
-        lease = try CaptureUpdateOwnershipLease(directory: lockDirectory)
+        lease = try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: lockDirectory)
         state = .checking
     }
 
@@ -60,11 +60,10 @@ final class CaptureUpdateAdmission {
     }
 }
 
-/// Keeps the host's existing inode locked without claiming or rewriting its session record.
-final class CaptureUpdateOwnershipLease {
+final class CaptureReadOnlyRoutingLock {
     private let descriptor: Int32
 
-    init(directory: URL? = nil) throws {
+    init(validatingIdleOwnerIn directory: URL? = nil) throws {
         let directory = directory ?? URL(fileURLWithPath: "/tmp/capture-companion-\(getuid())", isDirectory: true)
         if mkdir(directory.path, 0o700) != 0, errno != EEXIST { throw CaptureUpdateBlocker.ownership }
         let parent = open(directory.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
@@ -74,7 +73,7 @@ final class CaptureUpdateOwnershipLease {
         guard fstat(parent, &root) == 0, root.st_uid == geteuid(), root.st_mode & 0o777 == 0o700 else {
             throw CaptureUpdateBlocker.ownership
         }
-        let fd = openat(parent, "owner.lock", O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
+        let fd = openat(parent, "owner.lock", O_RDONLY | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0o600)
         guard fd >= 0 else { throw CaptureUpdateBlocker.ownership }
         var accepted = false
         defer { if !accepted { close(fd) } }

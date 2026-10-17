@@ -63,7 +63,6 @@ targets:
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: YES
 
-  # Independent capture application. Internal betas retain the local development identity.
   MobileCapture:
     type: application
     platform: macOS

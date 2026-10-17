@@ -1,4 +1,3 @@
-"""Public beta policy and final-bundle validation shared by release commands."""
 import base64
 import hashlib
 import json

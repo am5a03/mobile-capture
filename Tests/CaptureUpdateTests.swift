@@ -13,11 +13,11 @@ struct CaptureUpdateTests {
         #expect(!admission.allowsCaptureWork)
         try admission.validate(blocker: nil, otherInstance: false)
         #expect(throws: CaptureUpdateBlocker.self) { try admission.begin(blocker: nil, otherInstance: false, lockDirectory: fixture.lock) }
-        #expect(throws: (any Error).self) { try CaptureUpdateOwnershipLease(directory: fixture.lock) }
+        #expect(throws: (any Error).self) { try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock) }
         #expect(try Data(contentsOf: fixture.owner).isEmpty)
         admission.cycleFinished()
         #expect(admission.allowsCaptureWork)
-        let next = try CaptureUpdateOwnershipLease(directory: fixture.lock)
+        let next = try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock)
         withExtendedLifetime(next) {}
     }
 
@@ -35,7 +35,7 @@ struct CaptureUpdateTests {
         owner.showSetup()
         owner.showDoctor()
         #expect(!owner.isSetupPresented && !owner.isDoctorPresented && !owner.canStart)
-        #expect(throws: (any Error).self) { try CaptureUpdateOwnershipLease(directory: fixture.lock) }
+        #expect(throws: (any Error).self) { try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock) }
     }
 
     @Test func `busy work and a second instance refuse admission before creating ownership`() throws {
@@ -49,14 +49,28 @@ struct CaptureUpdateTests {
         #expect(!FileManager.default.fileExists(atPath: fixture.owner.path))
     }
 
-    @Test func `saved legacy ownership is admitted without rewriting its bytes`() throws {
+    @Test(arguments: ["saved", "partial", "failed"])
+    func `idle ownership retains its inode and bytes during and after an update check`(phase: String) throws {
         let fixture = try UpdateFixture()
         defer { fixture.remove() }
-        try fixture.record(phase: "saved", restored: true, package: true)
+        try fixture.record(phase: phase, restored: true, package: true)
         let bytes = try Data(contentsOf: fixture.owner)
-        let lease = try CaptureUpdateOwnershipLease(directory: fixture.lock)
+        var before = stat()
+        try #require(lstat(fixture.owner.path, &before) == 0)
+        let admission = CaptureUpdateAdmission()
+        try admission.begin(blocker: nil, otherInstance: false, lockDirectory: fixture.lock)
+        #expect(throws: CaptureUpdateBlocker.self) { try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock) }
+        var during = stat()
+        try #require(lstat(fixture.owner.path, &during) == 0)
+        #expect(during.st_dev == before.st_dev && during.st_ino == before.st_ino)
         #expect(try Data(contentsOf: fixture.owner) == bytes)
-        withExtendedLifetime(lease) {}
+        admission.cycleFinished()
+        var after = stat()
+        try #require(lstat(fixture.owner.path, &after) == 0)
+        #expect(after.st_dev == before.st_dev && after.st_ino == before.st_ino)
+        #expect(try Data(contentsOf: fixture.owner) == bytes)
+        try admission.begin(blocker: nil, otherInstance: false, lockDirectory: fixture.lock)
+        admission.cycleFinished()
     }
 
     @Test(arguments: [("recording", true, true), ("saved", false, true), ("partial", true, false), ("unknown", true, true)])
@@ -64,7 +78,7 @@ struct CaptureUpdateTests {
         let fixture = try UpdateFixture()
         defer { fixture.remove() }
         try fixture.record(phase: state.0, restored: state.1, package: state.2)
-        #expect(throws: CaptureUpdateBlocker.self) { try CaptureUpdateOwnershipLease(directory: fixture.lock) }
+        #expect(throws: CaptureUpdateBlocker.self) { try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock) }
     }
 
     @Test func `unsafe lock modes symlinks hardlinks and unresolved records are blocked`() throws {
@@ -72,17 +86,17 @@ struct CaptureUpdateTests {
         defer { fixture.remove() }
         try FileManager.default.createDirectory(at: fixture.lock, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         try Data("/missing/session".utf8).write(to: fixture.owner)
-        #expect(throws: CaptureUpdateBlocker.self) { try CaptureUpdateOwnershipLease(directory: fixture.lock) }
+        #expect(throws: CaptureUpdateBlocker.self) { try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock) }
         try Data().write(to: fixture.owner)
         #expect(chmod(fixture.owner.path, 0o666) == 0)
-        #expect(throws: CaptureUpdateBlocker.self) { try CaptureUpdateOwnershipLease(directory: fixture.lock) }
+        #expect(throws: CaptureUpdateBlocker.self) { try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock) }
         #expect(chmod(fixture.owner.path, 0o600) == 0)
         let alias = fixture.root.appendingPathComponent("alias")
         #expect(link(fixture.owner.path, alias.path) == 0)
-        #expect(throws: CaptureUpdateBlocker.self) { try CaptureUpdateOwnershipLease(directory: fixture.lock) }
+        #expect(throws: CaptureUpdateBlocker.self) { try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock) }
         try FileManager.default.removeItem(at: fixture.owner)
         try FileManager.default.createSymbolicLink(at: fixture.owner, withDestinationURL: alias)
-        #expect(throws: CaptureUpdateBlocker.self) { try CaptureUpdateOwnershipLease(directory: fixture.lock) }
+        #expect(throws: CaptureUpdateBlocker.self) { try CaptureReadOnlyRoutingLock(validatingIdleOwnerIn: fixture.lock) }
     }
     @Test func `a separate process holding the host lock prevents update admission`() throws {
         let fixture = try UpdateFixture()
