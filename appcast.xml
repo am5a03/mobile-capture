@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:capture="https://mobilecapture.local/xml-namespaces/updates" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Mobile Capture beta updates</title>
+    <link>https://github.com/am5a03/mobile-capture</link>
+    <description>Internal development betas. Ad-hoc signed and not notarized.</description>
+    <item>
+      <title>v0.1.2-beta.1</title>
+      <sparkle:version>2001</sparkle:version>
+      <sparkle:shortVersionString>0.1.2-beta.1</sparkle:shortVersionString>
+      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <capture:releaseTag>v0.1.2-beta.1</capture:releaseTag>
+      <capture:releaseCommit>48db31eb20708597e3be5a3b8618654cce21d8d6</capture:releaseCommit>
+      <capture:sha256>0894249ccf31d2e47514a5682f2cfb6967eb3b991be5d651f97fe218a75a58c5</capture:sha256>
+      <description>Install and diagnose with an agent from the repository URL using [Agent Setup](https://github.com/am5a03/mobile-capture/blob/main/docs/AGENT_SETUP.md).
+
+Requires Apple Silicon and macOS 26+. The ZIP includes the capture engine, embedded Python and Android tools. Physical iPhone USB logging needs separate supported tools; Simulator capture needs Xcode. Phone certificate trust and VPN approval remain user steps. JSON Doctor reports Mac prerequisites, not phone readiness.
+
+**Development beta: ad-hoc signed and not notarized.** Install only if you trust this project and explicitly accept development builds. macOS can block execution; the installer reports a manual approval handoff and never bypasses Gatekeeper. Beta-tag packages include manual Sparkle updates. An update becomes available only after the maintainer signs the final public archive and publishes its signed feed locally. The private beta key stays in the maintainer's Keychain. Existing v0.1.1-beta.1 needs a one-time install to gain the updater. This beta is for setup testing. Simulator Doctor can report an installed Xcode shell launcher as incompatible; the read-only check never runs first-launch setup. Fresh-Mac and full device acceptance remain outstanding.
+
+
+## What's Changed
+* feat(updates): add signed Sparkle updates for internal betas by @am5a03 in https://github.com/am5a03/mobile-capture/pull/3
+
+
+**Full Changelog**: https://github.com/am5a03/mobile-capture/compare/v0.1.1-beta.1...v0.1.2-beta.1
+
+## Test the in-app update
+
+Install this updater-enabled beta once, then choose **Mobile Capture → Check for Updates…** to install [v0.1.2-beta.2](https://github.com/am5a03/mobile-capture/releases/tag/v0.1.2-beta.2). Initial macOS approval remains a user step for this unnotarized development build.
+
+Automatic checks start off, and installation requires a user choice. Capture, save, setup, Doctor and recovery work prevent an update from replacing active helpers. The signed update feed is published locally after verification; the private update key stays in the maintainer’s Keychain.
+
+Implementation: [PR #3](https://github.com/am5a03/mobile-capture/pull/3).
+</description>
+      <pubDate>Sat, 17 Oct 2026 06:28:06 GMT</pubDate>
+      <enclosure url="https://github.com/am5a03/mobile-capture/releases/download/v0.1.2-beta.1/MobileCapture-macOS-arm64-development.zip" length="65798287" type="application/octet-stream" sparkle:edSignature="oMltOVIPk9XegWsSoMwfsSbN6HAeWsvtAMQxgoHP7h5JA3jc3P7n0Oqr3fBFL5ruMe4GqJ+t8Kb2wWVsU2k5Dw=="></enclosure>
+    </item>
+  </channel>
+</rss><!-- sparkle-signatures:
+edSignature: NUPXE/3WDE/kKrCRojX1yO7YbysgNH3cxpZqTV6iuxYgmrgh79PoJO6VGnkQvoReh3/VUz3VnYxTB4ML3ZnQDQ==
+length: 3784
+-->
