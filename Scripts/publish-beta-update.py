@@ -224,10 +224,13 @@ def prepare(args, config):
         extracted.mkdir()
         subprocess.run(["/usr/bin/tar", "-xf", str(archive), "-C", str(extracted), "--no-same-owner", "--no-acls", "--no-fflags", "--exclude", "__MACOSX"], check=True)
         app = extracted / "Mobile Capture.app"
+        if not stat.S_ISDIR(app.lstat().st_mode):
+            raise ValueError("Extracted app must be an ordinary directory")
+        canonical_app = app.resolve(strict=True)
         for entry in [app, *app.rglob("*")]:
             mode = entry.lstat().st_mode
             if stat.S_ISLNK(mode):
-                if not entry.resolve(strict=True).is_relative_to(app):
+                if not entry.resolve(strict=True).is_relative_to(canonical_app):
                     raise ValueError("Extracted bundle symlink escapes its app")
             elif not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
                 raise ValueError("Extracted bundle contains a special file")

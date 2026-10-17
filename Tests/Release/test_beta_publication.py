@@ -5,6 +5,7 @@ import json
 import os
 import plistlib
 from pathlib import Path
+import stat
 import subprocess
 import sys
 import tarfile
@@ -262,16 +263,29 @@ if args[1] == "generate" {
                         publication.publish(SimpleNamespace(prepared=self.root), self.config)
                     self.assertEqual([call.args[0] for call in requests.call_args_list], ["GET"])
 
-    def test_prepare_signs_the_final_public_archive_and_feed_with_account_only(self):
+    def test_prepare_signs_final_archive_with_framework_links_under_symlinked_temporary_root(self):
         info = {"CFBundleShortVersionString": "0.1.2", "CFBundleVersion": "2001", "CFBundleIdentifier": self.config["bundleIdentifier"], "CFBundleExecutable": "Mobile Capture", "MobileCaptureDevelopmentIdentity": True, "LSMinimumSystemVersion": "26.0"}
         info.update(beta.sealed_metadata(self.config, self.candidate["tag"]))
         with zipfile.ZipFile(self.archive, "w") as archive:
             archive.writestr("Mobile Capture.app/Contents/Info.plist", plistlib.dumps(info))
             for name in ("Mobile Capture", "mobile-capture-host", "mobile-capture-proxy"):
                 archive.writestr("Mobile Capture.app/Contents/MacOS/" + name, b"synthetic executable")
+            framework = "Mobile Capture.app/Contents/Frameworks/Sparkle.framework/"
+            archive.writestr(framework + "Versions/B/Sparkle", b"synthetic framework")
+            archive.writestr(framework + "Versions/B/Resources/Info.plist", plistlib.dumps({"CFBundleShortVersionString": self.config["sparkleVersion"]}))
+            for name, target in (("Versions/Current", "B"), ("Sparkle", "Versions/Current/Sparkle"), ("Resources", "Versions/Current/Resources")):
+                link = zipfile.ZipInfo(framework + name)
+                link.create_system = 3
+                link.external_attr = (stat.S_IFLNK | 0o777) << 16
+                archive.writestr(link, target)
         output = self.root / "prepared"
         tool_directory = self.root / "fake-tools"
         tool_directory.mkdir()
+        temporary_root = self.root / "ordinary-temporary-root"
+        temporary_root.mkdir()
+        temporary_alias = self.root / "temporary-alias"
+        temporary_alias.symlink_to(temporary_root, target_is_directory=True)
+        temporary_directory = tempfile.TemporaryDirectory
         args = SimpleNamespace(tag=self.candidate["tag"], expected_release_commit=self.candidate["commit"], expected_feed_sha="absent", output=output, tools_archive=None)
         real_run = subprocess.run
         signing_calls = []
@@ -301,7 +315,11 @@ if args[1] == "generate" {
         def fetched(config, tag, commit, destination):
             (destination / publication.ASSET).write_bytes(self.archive.read_bytes())
             return {"body": "Synthetic beta release notes"}
-        with patch.object(publication, "existing_feed", return_value=None), patch.object(publication, "fetch_release", side_effect=fetched), patch.object(publication, "verify_signatures"), patch.object(publication, "tools", return_value=tool_directory), patch.object(publication.subprocess, "run", side_effect=run):
+        def verified(app, config):
+            self.assertTrue(app.is_relative_to(temporary_alias))
+            self.assertNotEqual(app, app.resolve(strict=True))
+            self.assertEqual(len([entry for entry in app.rglob("*") if entry.is_symlink()]), 3)
+        with patch.object(publication, "existing_feed", return_value=None), patch.object(publication, "fetch_release", side_effect=fetched), patch.object(publication, "verify_signatures", side_effect=verified), patch.object(publication, "tools", return_value=tool_directory), patch.object(publication.tempfile, "TemporaryDirectory", side_effect=lambda **kwargs: temporary_directory(dir=temporary_alias, **kwargs)), patch.object(publication.subprocess, "run", side_effect=run):
             publication.prepare(args, self.config)
         record = json.loads((output / "publication.json").read_text())
         self.assertEqual(record["candidate"]["sha256"], beta.sha256(self.archive))
@@ -312,6 +330,43 @@ if args[1] == "generate" {
         self.assertEqual(items[0]["sha256"], beta.sha256(self.archive))
         self.assertEqual(tree.findtext(f"channel/item/{{{publication.SPARKLE}}}shortVersionString"), "0.1.2-beta.1")
         self.assertEqual(beta.archive_info(output / publication.ASSET, self.config, self.candidate["tag"])["CFBundleShortVersionString"], "0.1.2")
+
+    def test_unsafe_extracted_bundle_stops_before_verification_or_signing(self):
+        info = {"CFBundleShortVersionString": "0.1.2", "CFBundleVersion": "2001", "CFBundleIdentifier": self.config["bundleIdentifier"], "MobileCaptureDevelopmentIdentity": True}
+        info.update(beta.sealed_metadata(self.config, self.candidate["tag"]))
+        real_run = subprocess.run
+        for unsafe in ("escaping-link", "root-link", "root-file", "special-file"):
+            with self.subTest(unsafe=unsafe):
+                with zipfile.ZipFile(self.archive, "w") as archive:
+                    archive.writestr("Mobile Capture.app/Contents/Info.plist", plistlib.dumps(info))
+                    if unsafe == "escaping-link":
+                        for name, target in (("Alias", "."), ("Contents/escape", "../Alias/..")):
+                            link = zipfile.ZipInfo("Mobile Capture.app/" + name)
+                            link.create_system = 3
+                            link.external_attr = (stat.S_IFLNK | 0o777) << 16
+                            archive.writestr(link, target)
+                output = self.root / unsafe
+                args = SimpleNamespace(tag=self.candidate["tag"], expected_release_commit=self.candidate["commit"], expected_feed_sha="absent", output=output, tools_archive=None)
+                def run(command, **kwargs):
+                    result = real_run(command, **kwargs)
+                    if command[0] == "/usr/bin/tar":
+                        app = Path(command[command.index("-C") + 1]) / "Mobile Capture.app"
+                        if unsafe in {"root-link", "root-file"}:
+                            app.rename(app.with_name("ordinary-app"))
+                            if unsafe == "root-link":
+                                app.symlink_to("ordinary-app", target_is_directory=True)
+                            else:
+                                app.write_text("not an app directory")
+                        elif unsafe == "special-file":
+                            os.mkfifo(app / "Contents/special")
+                    return result
+                with patch.object(publication, "existing_feed", return_value=None), patch.object(publication, "fetch_release", side_effect=self.fake_release), patch.object(publication, "verify_signatures") as signatures, patch.object(publication, "tools") as signing_tools, patch.object(publication.subprocess, "run", side_effect=run):
+                    with self.assertRaises(ValueError):
+                        publication.prepare(args, self.config)
+                    signatures.assert_not_called()
+                    signing_tools.assert_not_called()
+                self.assertFalse((output / "publication.json").exists())
+                self.assertFalse((output / "appcast.xml").exists())
 
     def test_race_during_commit_creation_fails_without_updating_ref(self):
         self.prepared()
