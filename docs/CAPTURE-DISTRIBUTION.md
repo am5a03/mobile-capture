@@ -6,7 +6,7 @@ scheme or use `Scripts/release-mobile-capture.sh`. Oh My Android has an optional
 network dependencies. The products have separate lifecycles and versions.
 
 The default identity, `local.mobilecapture.development`, is provisional. Select
-an owner-controlled release bundle ID before public distribution; the final app
+an owner-controlled release bundle ID before stable distribution; the final app
 icon and fresh-identity OS permission checks also remain release work. See
 [implementation checkpoints and validation](CAPTURE-STANDALONE-IMPLEMENTATION.md).
 
@@ -218,7 +218,7 @@ If macOS blocks even a prepared development probe, it fails with the owned
 process stopped; a Developer ID signed/notarized build is the release path.
 
 No Developer ID identity is assumed to exist on a developer machine. Producing an
-ad-hoc development app/archive is possible without one. Public distribution needs
+ad-hoc development app/archive is possible without one. Stable distribution needs
 a valid Developer ID identity, notarization and stapling before packaging a ZIP or
 DMG, following [Apple's direct-distribution workflow](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution).
 
@@ -284,7 +284,7 @@ It does not upload or publish anything. Development signatures are ad-hoc and th
 artifact is not notarized; this is a local testing build, not a frictionless
 public download. The script does not change Gatekeeper or quarantine settings.
 
-For a public distribution build, use your own **Developer ID Application**
+For a stable distribution build, use your own **Developer ID Application**
 certificate and a `notarytool` keychain profile named `mobile-capture` (or set
 `NOTARY_PROFILE`). Then run:
 

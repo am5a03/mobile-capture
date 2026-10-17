@@ -3,6 +3,7 @@
 Use this procedure after the tag workflow publishes the complete beta release.
 It requires a Mac with Xcode tools, Python 3, GitHub CLI, repository write access,
 and the existing beta signing account in the local login Keychain.
+Internal beta updates do not require an Apple Developer ID.
 
 The beta key stays in Keychain. Do not export it, pass it through an environment
 variable, or place it in GitHub Actions. Actions publishes the final ad-hoc signed

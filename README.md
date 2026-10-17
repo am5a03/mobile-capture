@@ -112,7 +112,7 @@ Hardware and fresh-Mac acceptance remain separate.
 
 Implementation/proof reports describe their recorded checkpoint; they are not
 claims that every later change or every device has passed hardware acceptance.
-Public distribution still needs a permanent release identity/icon, Developer ID
+Stable distribution still needs a permanent release identity/icon, Developer ID
 signing/notarization, fresh-Mac setup validation and resolution of the recorded
 WireGuard engine shutdown issue. HTTPS capture also depends on app proxy behavior
 and CA trust; pinning, QUIC and IPv6 can leave gaps. Captures can contain private
