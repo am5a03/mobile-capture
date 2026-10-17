@@ -14,9 +14,10 @@ existing Xcode installation.
 ## 1. Select an authorized version
 
 Open [Mobile Capture releases](https://github.com/am5a03/mobile-capture/releases).
-Get the user's authorization for an exact tag before installation. Use a stable
-tag when the user requests stable. If no suitable stable release exists, report
-that result. A prerelease requires explicit consent to a development build.
+Use the installation and channel permission already given in the task. Select
+and record an exact stable tag when stable installation is authorized. If no suitable stable release exists, report
+that result. A prerelease requires explicit consent to a development build. Ask only when
+that consent is missing; do not ask again when the task already grants it.
 
 The pinned example below uses `v0.1.1-beta.1`. This development build is ad-hoc
 signed and unnotarized. Use the example only with authorization for that exact
@@ -36,11 +37,11 @@ release_version='v0.1.1-beta.1'
 setup_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/mobile-capture-setup.XXXXXX")
 cd "$setup_directory"
 release_url="https://github.com/am5a03/mobile-capture/releases/download/$release_version"
-/usr/bin/curl --fail --location --output install.sh "$release_url/install.sh"
-/usr/bin/curl --fail --location --output SHA256SUMS "$release_url/SHA256SUMS"
+/usr/bin/curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output install.sh "$release_url/install.sh"
+/usr/bin/curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output SHA256SUMS "$release_url/SHA256SUMS"
 /usr/bin/awk '$2 == "install.sh" { print }' SHA256SUMS > installer.SHA256SUMS
-/usr/bin/test -s installer.SHA256SUMS && /usr/bin/shasum -a 256 -c installer.SHA256SUMS
-/usr/bin/less install.sh
+/bin/test -s installer.SHA256SUMS && /usr/bin/shasum -a 256 -c installer.SHA256SUMS
+/bin/cat install.sh
 ```
 
 Stop if a download or checksum check fails. Read the entire script before
