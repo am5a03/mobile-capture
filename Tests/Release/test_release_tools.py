@@ -5,12 +5,14 @@ import os
 from pathlib import Path
 import plistlib
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "Scripts"))
 def module(name, filename):
     spec = importlib.util.spec_from_file_location(name, ROOT / "Scripts" / filename)
     result = importlib.util.module_from_spec(spec)
@@ -111,7 +113,7 @@ class ReleaseAssetsTests(unittest.TestCase):
         path=self.package/f"MobileCapture-1.2.3-arm64-{mode}.zip"
         with zipfile.ZipFile(path,"w") as archive:
             if app:
-                archive.writestr("Mobile Capture.app/Contents/Info.plist", plistlib.dumps({"CFBundleShortVersionString":version, "MobileCaptureCompanion":True, "MobileCaptureDevelopmentIdentity":mode=="development"}))
+                archive.writestr("Mobile Capture.app/Contents/Info.plist", plistlib.dumps({"CFBundleShortVersionString":version, "MobileCaptureCompanion":True, "MobileCaptureDevelopmentIdentity":mode=="development", "CaptureDistributionUpdatesEnabled":False}))
             else: archive.writestr("README.md", "source checkout")
         digest=hashlib.sha256(path.read_bytes()).hexdigest()
         (self.package/"SHA256SUMS").write_text(f"{digest}  {path.name}\n")

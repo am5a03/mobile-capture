@@ -17,8 +17,6 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write
-    env:
-      CAPTURE_BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,6 +24,8 @@ jobs:
           persist-credentials: false
       - name: Set package paths
         run: |
+          build_number=$(python3 -B Scripts/release-assets.py build-number --run-number "$GITHUB_RUN_NUMBER" --run-attempt "$GITHUB_RUN_ATTEMPT")
+          echo "CAPTURE_BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
           echo "CAPTURE_DEPENDENCY_CACHE=$RUNNER_TEMP/capture-dependencies" >> "$GITHUB_ENV"
           echo "CAPTURE_ARTIFACT_DIRECTORY=$RUNNER_TEMP/capture-package" >> "$GITHUB_ENV"
       - name: Validate tag and required signing configuration
@@ -60,23 +60,26 @@ jobs:
         env:
           CAPTURE_RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_MODE: ${{ steps.release.outputs.mode }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
           TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
           CAPTURE_BUNDLE_IDENTIFIER: ${{ vars.CAPTURE_BUNDLE_IDENTIFIER }}
           NOTARY_PROFILE: mobile-capture-ci
           NOTARY_KEYCHAIN: ${{ runner.temp }}/mobile-capture-signing.keychain-db
         run: |
           if [[ "$RELEASE_MODE" == development ]]; then
+            if [[ "$RELEASE_TAG" == *-beta.* ]]; then export CAPTURE_BETA_RELEASE_TAG="$RELEASE_TAG"; fi
             Scripts/release-mobile-capture.sh --development
           else
             Scripts/release-mobile-capture.sh
           fi
       - name: Stage release downloads
         env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_MODE: ${{ steps.release.outputs.mode }}
         run: |
           python3 -B Scripts/release-assets.py stage --package "$CAPTURE_ARTIFACT_DIRECTORY" \
-            --output "$RUNNER_TEMP/release-assets" --version "$RELEASE_VERSION" --mode "$RELEASE_MODE"
+            --output "$RUNNER_TEMP/release-assets" --version "$RELEASE_VERSION" --mode "$RELEASE_MODE" --tag "$RELEASE_TAG"
       - name: Write setup and signing notes
         env:
           RELEASE_MODE: ${{ steps.release.outputs.mode }}
@@ -89,7 +92,7 @@ jobs:
           if [[ "$RELEASE_MODE" == development ]]; then
             cat >> "$RUNNER_TEMP/release-notes.md" <<'NOTES'
 
-          **Development beta: ad-hoc signed and not notarized.** Install only if you trust this project and explicitly accept development builds. macOS can block execution; the installer reports a manual approval handoff and never bypasses Gatekeeper. This beta is for setup testing. Simulator Doctor can report an installed Xcode shell launcher as incompatible; the read-only check never runs first-launch setup. Fresh-Mac and full device acceptance remain outstanding.
+          **Development beta: ad-hoc signed and not notarized.** Install only if you trust this project and explicitly accept development builds. macOS can block execution; the installer reports a manual approval handoff and never bypasses Gatekeeper. Beta-tag packages include manual Sparkle updates. An update becomes available only after the maintainer signs the final public archive and publishes its signed feed locally. The private beta key stays in the maintainer's Keychain. Existing v0.1.1-beta.1 needs a one-time install to gain the updater. This beta is for setup testing. Simulator Doctor can report an installed Xcode shell launcher as incompatible; the read-only check never runs first-launch setup. Fresh-Mac and full device acceptance remain outstanding.
           NOTES
           fi
       - name: Publish the release with its verified app and setup assets

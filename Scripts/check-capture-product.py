@@ -3,6 +3,7 @@
 import argparse
 import plistlib
 from pathlib import Path
+from beta_updates import policy, validate_framework, validate_info
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--product", choices=("capture", "android"), required=True)
@@ -25,11 +26,11 @@ if args.product == "capture":
     require(info.get("CFBundleDisplayName") == "Mobile Capture", "Capture product has the wrong display identity")
     require(info.get("MobileCaptureCompanion") is True, "Capture companion metadata is missing")
     require(1 in info.get("MobileCaptureHandoffVersions", []), "Launch handoff version is missing")
-    require(info.get("CaptureDistributionUpdatesEnabled") is False, "Prototype updates must stay disabled")
+    validate_info(info, policy())
+    validate_framework(app, policy())
     for helper in ("mobile-capture-host", "mobile-capture-proxy"):
         require(executable(helper), f"Missing capture helper: {helper}")
     require(not (macos / "ohmyandroid-mcp").exists(), "Capture product unexpectedly embeds the Android MCP")
-    require(not (app / "Contents/Frameworks/Sparkle.framework").exists(), "Capture product must not inherit the original updater")
     require((resources / "CaptureRuntime/network_addon.py").is_file(), "Network addon resource is missing")
     if not args.allow_unbundled_dependencies:
         require(executable("capture-adb"), "Packaged capture ADB is missing")

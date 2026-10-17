@@ -8,6 +8,7 @@ import plistlib
 import re
 import shutil
 import zipfile
+from beta_updates import BETA_TAG, archive_info, build_number, policy, validate_info
 
 TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:alpha|beta|rc)\.[1-9][0-9]*)?")
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,7 +37,13 @@ def check_signing(environment):
     if identifier.startswith("local.") or not re.fullmatch(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", identifier):
         raise ValueError("CAPTURE_BUNDLE_IDENTIFIER must be your owner-controlled release identity")
 
-def stage(package, output, version, mode):
+def ci_build_number(run_number, run_attempt):
+    if not 1 <= run_attempt <= 999 or run_number < 1:
+        raise ValueError("CI run number must be positive and run attempt must be between 1 and 999")
+    return build_number(str(run_number * 1000 + run_attempt))
+
+
+def stage(package, output, version, mode, tag=None):
     if mode not in {"development", "release"} or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
         raise ValueError("Invalid package version or signing mode")
     source = package / f"MobileCapture-{version}-arm64-{mode}.zip"
@@ -58,6 +65,12 @@ def stage(package, output, version, mode):
         raise ValueError("App metadata does not match the requested release")
     if info.get("MobileCaptureDevelopmentIdentity") is not (mode == "development"):
         raise ValueError("App signing mode does not match the requested release")
+    if tag and BETA_TAG.fullmatch(tag):
+        archive_info(source, policy(), tag)
+    else:
+        validate_info(info, policy())
+        if info.get("CaptureDistributionUpdatesEnabled") is not False:
+            raise ValueError("Only beta tags may enable beta updates")
     for relative in SUPPORT_ASSETS.values():
         if not (ROOT / relative).is_file():
             raise ValueError("Release is missing setup asset: " + relative)
@@ -85,6 +98,10 @@ def main():
     assets.add_argument("--output", type=Path, required=True)
     assets.add_argument("--version", required=True)
     assets.add_argument("--mode", required=True)
+    assets.add_argument("--tag")
+    build = commands.add_parser("build-number")
+    build.add_argument("--run-number", type=int, required=True)
+    build.add_argument("--run-attempt", type=int, required=True)
     args = parser.parse_args()
     if args.command == "plan":
         values = plan(json.loads(args.event.read_text()))
@@ -93,8 +110,10 @@ def main():
         with args.output.open("a") as stream:
             for key, value in values.items():
                 stream.write(f"{key}={value}\n")
+    elif args.command == "build-number":
+        print(ci_build_number(args.run_number, args.run_attempt))
     else:
-        print(stage(args.package, args.output, args.version, args.mode))
+        print(stage(args.package, args.output, args.version, args.mode, args.tag))
 
 if __name__ == "__main__":
     main()

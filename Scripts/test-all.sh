@@ -11,6 +11,7 @@ case "${1:-all}" in
     bash Scripts/test-iphone-capture-setup.sh
     ;;
   services)
+    bash Scripts/test-capture-updates.sh
     bash Scripts/test-capture-doctor.sh
     bash Scripts/test-agent-doctor-cli.sh
     bash Scripts/test-capture-setup-store.sh
