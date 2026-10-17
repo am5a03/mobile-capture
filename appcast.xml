@@ -6,6 +6,29 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <link>https://github.com/am5a03/mobile-capture</link>
     <description>Internal development betas. Ad-hoc signed and not notarized.</description>
     <item>
+      <title>v0.1.2-beta.2</title>
+      <sparkle:version>3001</sparkle:version>
+      <sparkle:shortVersionString>0.1.2-beta.2</sparkle:shortVersionString>
+      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <capture:releaseTag>v0.1.2-beta.2</capture:releaseTag>
+      <capture:releaseCommit>48db31eb20708597e3be5a3b8618654cce21d8d6</capture:releaseCommit>
+      <capture:sha256>d4010f87be5edf738ebdb350eedee519a02c62bd99bca101b7cd20987c583fa8</capture:sha256>
+      <description>&lt;h2&gt;Internal beta update test&lt;/h2&gt;
+&lt;p&gt;This beta uses the same reviewed code as beta 1, with a new beta label and build number so you can test download, installation and relaunch.&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;Check for updates from the Mobile Capture menu or Settings.&lt;/li&gt;
+&lt;li&gt;Installation waits for captures, saving, setup and recovery to finish.&lt;/li&gt;
+&lt;li&gt;Saved captures, certificates and phone tunnel profiles stay in their existing locations.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;To reproduce the upgrade, install &lt;a href="https://github.com/am5a03/mobile-capture/releases/tag/v0.1.2-beta.1"&gt;beta 1&lt;/a&gt;, then choose Check for Updates. This is beta 2, build 3001.&lt;/p&gt;
+&lt;p&gt;Requires Apple Silicon and macOS 26 or later. This internal development build is ad-hoc signed and not notarized. Initial macOS approval remains a user step. Automatic checks start off; installation requires your choice.&lt;/p&gt;
+&lt;p&gt;&lt;a href="https://github.com/am5a03/mobile-capture/blob/main/docs/AGENT_SETUP.md"&gt;Installation and device setup guide&lt;/a&gt; · &lt;a href="https://github.com/am5a03/mobile-capture/pull/3"&gt;Implementation&lt;/a&gt;&lt;/p&gt;
+</description>
+      <pubDate>Sat, 17 Oct 2026 06:29:43 GMT</pubDate>
+      <enclosure url="https://github.com/am5a03/mobile-capture/releases/download/v0.1.2-beta.2/MobileCapture-macOS-arm64-development.zip" length="65798292" type="application/octet-stream" sparkle:edSignature="gaBLfizfQOxjDrjhmQQvmcYhdHiQZ0ureCSQkmghsFFV87NAXHUd4ho8S1RcdTQk90BFX07JHqT2Xx+OUqnhAA=="></enclosure>
+    </item>
+    <item>
       <title>v0.1.2-beta.1</title>
       <sparkle:version>2001</sparkle:version>
       <sparkle:shortVersionString>0.1.2-beta.1</sparkle:shortVersionString>
@@ -40,6 +63,6 @@ Implementation: [PR #3](https://github.com/am5a03/mobile-capture/pull/3).
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: NUPXE/3WDE/kKrCRojX1yO7YbysgNH3cxpZqTV6iuxYgmrgh79PoJO6VGnkQvoReh3/VUz3VnYxTB4ML3ZnQDQ==
-length: 3784
+edSignature: cduiaAuMgrMuk+xsUhyPCR1AoHt/8KONYqlOnBqVyrItpEuyLvv4qLUUa7C8ObCAXtOX1FD8HVFTPsmLGPGnCQ==
+length: 5953
 -->
