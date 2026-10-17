@@ -19,7 +19,7 @@ and record an exact stable tag when stable installation is authorized. If no sui
 that result. A prerelease requires explicit consent to a development build. Ask only when
 that consent is missing; do not ask again when the task already grants it.
 
-The pinned example below uses `v0.1.1-beta.1`. This development build is ad-hoc
+The pinned example below uses `v0.1.2-beta.1`. This development build is ad-hoc
 signed and unnotarized. Use the example only with authorization for that exact
 beta. Its publication and availability must be checked on the release page.
 
@@ -33,7 +33,7 @@ are named `MobileCapture-macOS-arm64.zip`. Development ZIPs are named
 Run these commands in one shell after the version decision:
 
 ```sh
-release_version='v0.1.1-beta.1'
+release_version='v0.1.2-beta.1'
 setup_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/mobile-capture-setup.XXXXXX")
 cd "$setup_directory"
 release_url="https://github.com/am5a03/mobile-capture/releases/download/$release_version"
@@ -103,6 +103,15 @@ An identical repeat installation is safe. A conflicting destination is rejected
 rather than overwritten. Keep any copy that owns an active or recoverable
 recording. Finish or recover that session in its owning app before starting a
 capture in another version. Installation does not interrupt or migrate it.
+
+Beta packages with the updater expose **Check for Updates…** in the app menu and
+Settings. Automatic checks start off. Existing `v0.1.1-beta.1` needs a one-time
+install to gain the updater. Installing an app does not authorize an update.
+
+Sparkle updates the installed app in place. A version-named parent directory
+records the installation origin after an update. Read the app's metadata for its
+current version and build. Re-running the original exact-tag installer after an
+update safely reports conflict `73`. Install an exact requested tag separately.
 
 Completion criterion: record the installer exit and app path. Exit `20` is an
 installed app awaiting human approval, not permission to run a blocked binary.

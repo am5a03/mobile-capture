@@ -164,6 +164,7 @@ final class CaptureCommandMenu: NSObject, NSMenuDelegate, NSMenuItemValidation {
             item.state = .off
             return false
         }
+        guard store.updateAdmission.allowsCaptureWork else { return false }
         switch action {
         case .setup: return !store.isBusy && !store.doctor.isRepairing
         case .doctor: return !store.isBusy && !store.hasActiveCapture && !store.doctor.isRepairing

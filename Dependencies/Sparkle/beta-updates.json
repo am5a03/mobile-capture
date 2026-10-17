@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "channel": "beta",
+  "bundleIdentifier": "local.mobilecapture.development",
+  "feedURL": "https://raw.githubusercontent.com/am5a03/mobile-capture/codex/beta-update-feed/appcast.xml",
+  "publicEDKey": "8cxIrSMM9Vjr907IOpLUea+gsq82y8Gl65St8+W+LXE=",
+  "keychainAccount": "am5a03.mobile-capture.beta",
+  "feedBranch": "codex/beta-update-feed",
+  "feedPath": "appcast.xml",
+  "sparkleVersion": "2.10.0",
+  "sparkleToolsURL": "https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz",
+  "sparkleToolsSHA256": "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c"
+}

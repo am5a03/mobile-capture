@@ -28,15 +28,19 @@ and open it to begin Device Setup. Current packages require Apple Silicon and
 macOS 26. A release becomes visible after its verified app ZIP is attached.
 
 Stable releases use `MobileCapture-macOS-arm64.zip`. Development prereleases use
-`MobileCapture-macOS-arm64-development.zip` and are not notarized. The release
-workflow needs to be merged and a version tag pushed before downloads exist.
+`MobileCapture-macOS-arm64-development.zip` and are not notarized. Beta-tag
+packages expose **Check for Updates…** in the app menu and Settings.
+Automatic checks start off. A maintainer must sign the final public archive and
+publish the signed feed locally before an update is advertised. Existing
+`v0.1.1-beta.1` needs a one-time install to gain the updater.
 See [publish a downloadable release](docs/RELEASES.md) for the maintainer steps.
 
 ## Build
 
 The current development target is **macOS 26 on Apple Silicon**, with
-**Swift 6.3**, XcodeGen and Xcode. The toolchain was validated with Xcode 26.6. This repository has no Swift package dependencies
-and contains only the capture app and its two native helpers.
+**Swift 6.3**, XcodeGen and Xcode. The toolchain was validated with Xcode 26.6.
+This repository pins Sparkle 2.10.0 and contains the capture app and its two
+native helpers.
 
 ```sh
 git clone https://github.com/am5a03/mobile-capture.git
@@ -98,6 +102,7 @@ Hardware and fresh-Mac acceptance remain separate.
 - [Agent setup from a repository URL](docs/AGENT_SETUP.md)
 - [Capture usage and platform limitations](docs/CAPTURE.md)
 - [Build, dependency packaging and distribution](docs/CAPTURE-DISTRIBUTION.md)
+- [Publish an internal beta update](docs/BETA-UPDATES.md)
 - [Evidence package format](docs/CAPTURE-PACKAGE.md)
 - [Native runtime architecture](docs/CAPTURE-NATIVE-RUNTIME.md)
 - [First-run setup and Doctor](docs/CAPTURE-SETUP-IMPLEMENTATION.md)
@@ -107,7 +112,7 @@ Hardware and fresh-Mac acceptance remain separate.
 
 Implementation/proof reports describe their recorded checkpoint; they are not
 claims that every later change or every device has passed hardware acceptance.
-Public distribution still needs a permanent release identity/icon, Developer ID
+Stable distribution still needs a permanent release identity/icon, Developer ID
 signing/notarization, fresh-Mac setup validation and resolution of the recorded
 WireGuard engine shutdown issue. HTTPS capture also depends on app proxy behavior
 and CA trust; pinning, QUIC and IPv6 can leave gaps. Captures can contain private

@@ -28,6 +28,9 @@ if [[ -n "${CAPTURE_BUILD_NUMBER:-}" ]]; then
   [[ "$CAPTURE_BUILD_NUMBER" =~ '^[1-9][0-9]*$' ]] || { print -u2 "CAPTURE_BUILD_NUMBER must be a positive integer."; exit 2; }
   BUILD_OPTIONS+=("CURRENT_PROJECT_VERSION=$CAPTURE_BUILD_NUMBER")
 fi
+if [[ -n "${CAPTURE_BETA_RELEASE_TAG:-}" ]]; then
+  [[ "$MODE" == development && -n "${CAPTURE_RELEASE_VERSION:-}" ]] || { print -u2 "Beta updates require development signing and CAPTURE_RELEASE_VERSION."; exit 2; }
+fi
 SCHEME=MobileCapture
 BUNDLE="Mobile Capture.app"
 ARTIFACT=MobileCapture
@@ -61,9 +64,13 @@ mkdir -p "$DESTINATION"
 /usr/bin/ditto "$BUILD/$BUNDLE" "$DESTINATION/$BUNDLE"
 APP="$DESTINATION/$BUNDLE"
 /usr/bin/ditto LICENSE "$APP/Contents/Resources/PROJECT-LICENSE.txt"
+/usr/bin/ditto Dependencies/Sparkle/LICENSE.txt "$APP/Contents/Resources/SPARKLE-LICENSE.txt"
 if [[ "$MODE" == release ]]; then
   /usr/libexec/PlistBuddy -c 'Set :MobileCaptureDevelopmentIdentity false' "$APP/Contents/Info.plist"
 fi
+BETA_OPTIONS=()
+if [[ -n "${CAPTURE_BETA_RELEASE_TAG:-}" ]]; then BETA_OPTIONS+=(--tag "$CAPTURE_BETA_RELEASE_TAG"); fi
+python3 -B Scripts/configure-beta-updates.py seal --app "$APP" "${BETA_OPTIONS[@]}"
 swift Scripts/bundle-capture-dependencies.swift install --app "$APP" \
   --cache-root "$CAPTURE_DEPENDENCY_CACHE" --sign "$IDENTITY"
 if (( USB_CANDIDATE )); then
@@ -74,6 +81,15 @@ SIGN=(/usr/bin/codesign --force --sign "$IDENTITY")
 if [[ "$MODE" == release ]]; then SIGN+=(--options runtime --timestamp)
 else SIGN+=(--options 0 --timestamp=none)
 fi
+python3 -B Scripts/configure-beta-updates.py sign-list --app "$APP" > "$DESTINATION/sparkle-sign-list.txt"
+while IFS= read -r nested; do
+  if [[ "$nested" == */Downloader.xpc ]]; then
+    "${SIGN[@]}" --preserve-metadata=entitlements "$nested"
+  else
+    "${SIGN[@]}" "$nested"
+  fi
+done < "$DESTINATION/sparkle-sign-list.txt"
+while IFS= read -r nested; do /usr/bin/codesign --verify --deep --strict "$nested"; done < "$DESTINATION/sparkle-sign-list.txt"
 for helper in mobile-capture-host mobile-capture-proxy; do "${SIGN[@]}" "$APP/Contents/MacOS/$helper"; done
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP"
 /usr/bin/codesign --verify --deep --strict "$APP"
@@ -104,4 +120,9 @@ if [[ "$MODE" == development ]]; then
 elif (( ! NOTARIZE )); then
   print "Developer ID signed; notarization was explicitly skipped."
 fi
-print "Updates remain disabled pending independent release configuration. No upload or publication was performed."
+if [[ -n "${CAPTURE_BETA_RELEASE_TAG:-}" ]]; then
+  print "Beta updater policy sealed for $CAPTURE_BETA_RELEASE_TAG. Publish final assets, then sign and publish the feed locally."
+else
+  print "Updates are disabled for this package."
+fi
+print "No upload or publication was performed."

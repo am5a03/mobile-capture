@@ -24,6 +24,10 @@ settings:
       # Notarization rejects get-task-allow and signatures without a secure timestamp.
       CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
       OTHER_CODE_SIGN_FLAGS: "--timestamp"
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    exactVersion: 2.10.0
 targets:
   mobile-capture-host:
     type: tool
@@ -59,7 +63,6 @@ targets:
         CREATE_INFOPLIST_SECTION_IN_BINARY: YES
         SKIP_INSTALL: YES
 
-  # Independent capture application. The local identity is intentionally unsuitable for publishing.
   MobileCapture:
     type: application
     platform: macOS
@@ -89,6 +92,7 @@ targets:
         type: folder
         buildPhase: resources
     dependencies:
+      - package: Sparkle
       - target: mobile-capture-host
         embed: true
         codeSign: true
