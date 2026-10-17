@@ -2,7 +2,7 @@
 
 Use this guide after the release workflow is merged into the default branch.
 Push a version tag to build the complete Apple Silicon app. The workflow attaches
-the app ZIP and `SHA256SUMS`, then publishes the GitHub Release. It uses GitHub
+the app ZIP, `install.sh`, `AGENT_SETUP.md` and `SHA256SUMS`, then publishes the GitHub Release. It uses GitHub
 CLI's draft-upload-publish sequence, which supports immutable releases. Builds
 currently require macOS 26.
 
@@ -19,7 +19,8 @@ Wait for **Downloadable release** in Actions to finish. The `alpha`, `beta` or `
 suffix selects development signing and marks the new release as a prerelease.
 
 The release's Assets section then contains
-`MobileCapture-macOS-arm64-development.zip` and `SHA256SUMS`. The ZIP includes
+`MobileCapture-macOS-arm64-development.zip`, `install.sh`, `AGENT_SETUP.md` and
+`SHA256SUMS`. Checksums cover the ZIP, installer and guide. The ZIP includes
 mitmproxy, its Python interpreter and Android tools. Physical iPhone USB tools
 remain external in this ordinary package. Simulator capture requires Xcode.
 The app's numeric version comes from the tag, so `v0.1.1-beta.1` builds app version
@@ -94,6 +95,11 @@ publication. GitHub CLI does not overwrite an existing release. Publish a new
 version for a changed source commit.
 
 ## Install the app
+
+For installation by an agent from only the repository URL, follow
+[Agent Setup](AGENT_SETUP.md). The installer uses stock macOS tools and installs
+each exact version beside existing copies; it never starts capture or changes
+phone trust.
 
 1. Open the [Releases page](https://github.com/am5a03/mobile-capture/releases).
 2. Download the app ZIP listed above for your chosen release.

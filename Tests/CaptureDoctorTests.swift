@@ -15,6 +15,8 @@ private actor DoctorFixtureRunner: CaptureDoctorCommandRunning {
     var engineHelpExit: Int32 = 0
     var engineHelpError = ""
     var engineHelpHasHeader = true
+    var fileOutput: String? = nil
+    var developerSelection = CaptureDoctorCommandResult(exitCode: 1, stdout: "", stderr: "No developer tools selected")
 
     func configure(version: String? = nil, capability: String? = nil, architecture: Bool = false, signature: Bool = false,
                    offered: String = "1.4.0", installExit: Int32 = 0, installHook: (@Sendable () throws -> Void)? = nil,
@@ -24,12 +26,18 @@ private actor DoctorFixtureRunner: CaptureDoctorCommandRunning {
         self.engineHelpExit = engineHelpExit; self.engineHelpError = engineHelpError; self.engineHelpHasHeader = engineHelpHasHeader
     }
 
+    func configureDeveloperSelection(_ output: String, exitCode: Int32 = 0, truncated: Bool = false, fileOutput: String? = nil) {
+        self.fileOutput = fileOutput
+        developerSelection = .init(exitCode: exitCode, stdout: output, stderr: "", outputTruncated: truncated)
+    }
+
     func run(_ command: CaptureDoctorCommand, progress: @escaping @Sendable (String) -> Void) async throws -> CaptureDoctorCommandResult {
         commands.append(command)
         let name = command.executable.lastPathComponent
         func output(_ text: String, _ code: Int32 = 0) -> CaptureDoctorCommandResult { .init(exitCode: code, stdout: text, stderr: "") }
         if name == "codesign" { return output("", badSignature ? 1 : 0) }
-        if name == "lipo" { return output(badArchitecture ? "wrong_arch" : "arm64 x86_64") }
+        if name == "xcode-select" { return developerSelection }
+        if name == "file" { return output(fileOutput ?? (badArchitecture ? "Mach-O 64-bit executable ppc" : "Mach-O universal binary with 2 architectures: [x86_64:Mach-O 64-bit executable x86_64] [arm64:Mach-O 64-bit executable arm64]")) }
         if name == "brew", command.arguments.first == "info" {
             let version = command.arguments.last == "ideviceinstaller" ? "1.2.0" : offeredVersion
             let formula: [String: Any] = ["name": command.arguments.last ?? "", "tap": "homebrew/core",
@@ -120,7 +128,7 @@ struct CaptureDoctorTests {
         #expect(report.repairs.isEmpty)
         #expect(report.rows.contains { $0.id == "mitmdump" && $0.version == "12.2.3" && $0.source == .bundled })
         let calls = await runner.commands
-        #expect(calls.allSatisfy { ["codesign", "lipo", "mitmdump", "capture-adb"].contains($0.executable.lastPathComponent) })
+        #expect(calls.allSatisfy { ["codesign", "file", "mitmdump", "capture-adb"].contains($0.executable.lastPathComponent) })
         #expect(!calls.contains { $0.arguments.contains("devices") || $0.arguments.contains("start-server") || $0.executable.lastPathComponent == "python3" })
     }
 
@@ -240,6 +248,74 @@ struct CaptureDoctorTests {
         #expect(report.rows.contains { $0.id == "mitmdump" && $0.status == .incompatible && $0.repair == .reinstallApp })
     }
 
+    @Test(arguments: [false, true])
+    func simulatorResolvesSelectedXcodeWithoutDiscovery(selectApp: Bool) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("Xcode.app/Contents/Developer/usr/bin/simctl", bundled: false)
+        let developer = fixture.external.appendingPathComponent("Xcode.app/Contents/Developer")
+        let runner = DoctorFixtureRunner()
+        await runner.configureDeveloperSelection((selectApp ? developer.deletingLastPathComponent().deletingLastPathComponent() : developer).path + "\n")
+        var service = fixture.service(runner); service.trustedSystemRoots = [fixture.external]
+        let report = await service.inspect(fixture.request("simulator", logs: true, network: false))
+        #expect(report.isReady && report.rows.contains { $0.id == "simctl" && $0.source == .system && $0.path == developer.appendingPathComponent("usr/bin/simctl").path })
+        let commands = await runner.commands
+        #expect(commands.map(\.executable.lastPathComponent) == ["xcode-select", "file", "simctl"])
+        let selection = try #require(commands.first)
+        #expect(selection.arguments == ["--print-path"] && selection.timeoutSeconds == 5 && selection.maximumOutputBytes == 4_096)
+        #expect(selection.environment["DEVELOPER_DIR"] == nil)
+        #expect(commands.last?.arguments == ["help"])
+    }
+
+    @Test(arguments: ["unselected", "relative", "multiline", "nul", "blank", "truncated", "unsafe", "missing"])
+    func simulatorRejectsUnavailableOrMalformedDeveloperSelection(failure: String) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("Xcode.app/Contents/Developer/usr/bin/simctl", bundled: false)
+        let developer = fixture.external.appendingPathComponent("Xcode.app/Contents/Developer")
+        let runner = DoctorFixtureRunner()
+        let selection: String = switch failure {
+        case "relative": "relative/Xcode.app\n"
+        case "multiline": developer.path + "\n/Applications/Other.app\n"
+        case "nul": developer.path + "\0\n"
+        case "blank": "\n"
+        case "missing": fixture.external.appendingPathComponent("Missing.app/Contents/Developer").path + "\n"
+        default: developer.path + "\n"
+        }
+        await runner.configureDeveloperSelection(selection, exitCode: failure == "unselected" ? 1 : 0, truncated: failure == "truncated")
+        var service = fixture.service(runner)
+        if failure != "unsafe" { service.trustedSystemRoots = [fixture.external] }
+        let report = await service.inspect(fixture.request("simulator", logs: true, network: false))
+        #expect(!report.isReady && report.rows.contains { $0.id == "simctl" && $0.status == (failure == "unsafe" ? .incompatible : .missing) })
+        #expect((await runner.commands).map(\.executable.lastPathComponent) == ["xcode-select"])
+    }
+
+    @Test func selectedSimulatorScriptIsLocatedButNeverExecuted() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("Xcode.app/Contents/Developer/usr/bin/simctl", bundled: false)
+        let developer = fixture.external.appendingPathComponent("Xcode.app/Contents/Developer")
+        let runner = DoctorFixtureRunner()
+        await runner.configureDeveloperSelection(developer.path + "\n", fileOutput: "Bourne-Again shell script text executable, ASCII text\n")
+        var service = fixture.service(runner); service.trustedSystemRoots = [fixture.external]
+        let report = await service.inspect(fixture.request("simulator", logs: true, network: false))
+        #expect(report.rows.contains { $0.id == "simctl" && $0.status == .incompatible && $0.path == developer.appendingPathComponent("usr/bin/simctl").path })
+        #expect((await runner.commands).map(\.executable.lastPathComponent) == ["xcode-select", "file"])
+    }
+
+    @Test(arguments: [false, true])
+    func explicitSimulatorPathTakesPrecedenceWithoutResolvingSelection(override: Bool) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("Xcode.app/Contents/Developer/usr/bin/simctl", bundled: false)
+        let simulator = fixture.external.appendingPathComponent("Xcode.app/Contents/Developer/usr/bin/simctl")
+        var request = fixture.request("simulator", logs: true, network: false)
+        if override { request.toolOverrides = ["simctl": simulator.path] }
+        else { request.tools = ["simctl": simulator.path] }
+        let runner = DoctorFixtureRunner()
+        var service = fixture.service(runner)
+        service.trustedSystemRoots = [fixture.external]
+        let report = await service.inspect(request)
+        #expect(report.isReady)
+        #expect(!(await runner.commands).contains { $0.executable.lastPathComponent == "xcode-select" })
+    }
+
     @Test func optionalBrewIsGuidanceWhenMissingAndPreviewDoesNotInstall() async throws {
         let fixture = try DoctorFixture(); defer { fixture.cleanup() }; try fixture.engine()
         let runner = DoctorFixtureRunner(); let service = fixture.service(runner)
@@ -350,5 +426,181 @@ struct CaptureDoctorTests {
         await #expect(throws: CancellationError.self) { try await task.value }
         let cancelledChild = try #require(Int32(String(contentsOf: childFile, encoding: .utf8)))
         #expect(kill(cancelledChild, 0) == -1 && errno == ESRCH)
+    }
+}
+
+@Suite("Agent Doctor JSON contract")
+struct CaptureDoctorCLITests {
+    private func application(_ fixture: DoctorFixture) throws -> URL {
+        try fixture.create("Contents/MacOS/mobile-capture-host")
+        try fixture.create("Contents/MacOS/Mobile Capture")
+        let info: [String: Any] = ["CFBundlePackageType": "APPL", "CFBundleIdentifier": "local.mobilecapture.fixture",
+            "CFBundleExecutable": "Mobile Capture", "MobileCaptureCompanion": true, "MobileCaptureHandoffVersions": [1]]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: fixture.bundle.appendingPathComponent("Contents/Info.plist"))
+        return fixture.bundle.appendingPathComponent("Contents/MacOS/mobile-capture-host")
+    }
+
+    private func json(_ result: CaptureDoctorCLI.Result) throws -> [String: Any] {
+        let data = try result.envelope.json()
+        #expect(data.last == 10 && data.filter { $0 == 10 }.count == 1)
+        let value = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(Set(value.keys) == ["schemaVersion", "command", "scope", "platform", "captureNetwork", "captureLogs",
+            "appPath", "checkedAt", "macPrerequisitesReady", "checks", "repairs", "deviceSetup", "error"])
+        #expect(value["schemaVersion"] as? Int == 1 && value["command"] as? String == "doctor")
+        #expect(value["scope"] as? String == "macPrerequisites")
+        #expect((value["deviceSetup"] as? [String: Any])?["status"] as? String == "notChecked")
+        let sorted = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys, .withoutEscapingSlashes])
+        #expect(data.dropLast() == sorted)
+        return value
+    }
+
+    @Test(arguments: [
+        ["doctor"], ["doctor", "--platform", "android"], ["doctor", "--json"],
+        ["doctor", "--json", "--platform", "watch"], ["doctor", "--json", "--platform", "android", "--json"],
+        ["doctor", "--json", "--platform", "android", "--platform", "iphone"],
+        ["doctor", "--json", "--platform", "android", "--sources", "logs,network"],
+        ["doctor", "--json", "--platform", "android", "--sources", "network,network"],
+        ["doctor", "--json", "--platform", "android", "--output-directory", "relative"],
+        ["doctor", "--json", "--platform", "android", "--output-directory", "/tmp/bad\0path"],
+        ["doctor", "--json", "--platform", "android", "--app", "/tmp/Fake.app"],
+        ["doctor", "--json", "--platform", "android", "--repair"],
+        ["doctor", "--json", "--platform", "android", "--sources"]
+    ])
+    func invalidArgumentsNeverInspect(arguments: [String]) async throws {
+        let runner = DoctorFixtureRunner()
+        let result = await CaptureDoctorCLI.run(arguments: arguments, executableURL: URL(fileURLWithPath: "/missing"),
+            service: CaptureDoctorService(applicationBundle: nil, runner: runner))
+        let value = try json(result)
+        #expect(result.exitCode == 64)
+        #expect(value["platform"] is NSNull && value["appPath"] is NSNull && value["checkedAt"] is NSNull)
+        #expect(value["macPrerequisitesReady"] is NSNull)
+        #expect((value["error"] as? [String: String])?["code"] == "invalidArguments")
+        #expect((await runner.commands).isEmpty)
+    }
+
+    @Test(arguments: ["network", "logs", "network,logs"])
+    func validSourceSelectionUsesExistingChecks(sources: String) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        let executable = try application(fixture)
+        try fixture.engine(); try fixture.android()
+        let runner = DoctorFixtureRunner()
+        let result = await CaptureDoctorCLI.run(arguments: ["doctor", "--json", "--platform", "android", "--sources", sources,
+            "--output-directory", fixture.storage.path], executableURL: executable, service: fixture.service(runner))
+        let value = try json(result)
+        #expect(result.exitCode == 0 && value["macPrerequisitesReady"] as? Bool == true)
+        #expect(value["appPath"] as? String == fixture.bundle.resolvingSymlinksInPath().path)
+        #expect(value["captureNetwork"] as? Bool == (sources != "logs") && value["captureLogs"] as? Bool == (sources != "network"))
+        #expect(value["error"] is NSNull && value["checkedAt"] is String)
+        let checks = try #require(value["checks"] as? [[String: Any]])
+        #expect(checks.contains { $0["id"] as? String == "mitmdump" } == (sources != "logs"))
+        let calls = await runner.commands
+        #expect(calls.allSatisfy { ["codesign", "file", "mitmdump", "capture-adb"].contains($0.executable.lastPathComponent) })
+        #expect(!calls.contains { $0.arguments.contains("devices") || $0.arguments.contains("start-server") || $0.arguments.contains("install") })
+    }
+
+    @Test func defaultSourceAndUnmetPrerequisitesAreExplicit() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        let executable = try application(fixture)
+        let result = await CaptureDoctorCLI.run(arguments: ["doctor", "--platform", "iphone", "--json", "--output-directory", fixture.storage.path],
+            executableURL: executable, service: fixture.service(DoctorFixtureRunner()))
+        let value = try json(result)
+        #expect(result.exitCode == 10 && value["macPrerequisitesReady"] as? Bool == false)
+        #expect(value["captureNetwork"] as? Bool == true && value["captureLogs"] as? Bool == false)
+        let repairs = try #require(value["repairs"] as? [String]); #expect(repairs == repairs.sorted() && !repairs.isEmpty)
+        #expect(value["error"] is NSNull)
+        let actions = try #require((value["deviceSetup"] as? [String: Any])?["manualActions"] as? [String])
+        #expect(actions.contains { $0.contains("WireGuard") && $0.contains("tunnel on") && $0.contains("tunnel off") })
+        #expect(actions.contains { $0.contains("full trust") && $0.contains("Certificate Trust Settings") })
+    }
+
+    @Test(arguments: ["detached", "metadata", "marker", "versions", "identifier", "packageType", "main", "mainEscape", "escape", "directory"])
+    func invalidOwnersFailBeforeTools(failure: String) async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        var executable = try application(fixture)
+        if failure == "detached" { executable = fixture.root.appendingPathComponent("mobile-capture-host") }
+        if failure == "metadata" { try Data("invalid plist".utf8).write(to: fixture.bundle.appendingPathComponent("Contents/Info.plist")) }
+        if failure == "main" { try FileManager.default.removeItem(at: fixture.bundle.appendingPathComponent("Contents/MacOS/Mobile Capture")) }
+        if ["marker", "versions", "identifier", "packageType"].contains(failure) {
+            let plist = fixture.bundle.appendingPathComponent("Contents/Info.plist")
+            var info = try #require(PropertyListSerialization.propertyList(from: Data(contentsOf: plist), format: nil) as? [String: Any])
+            if failure == "marker" { info["MobileCaptureCompanion"] = false }
+            if failure == "versions" { info["MobileCaptureHandoffVersions"] = [2] }
+            if failure == "identifier" { info["CFBundleIdentifier"] = "" }
+            if failure == "packageType" { info["CFBundlePackageType"] = "BNDL" }
+            try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: plist)
+        }
+        if failure == "mainEscape" {
+            let main = fixture.bundle.appendingPathComponent("Contents/MacOS/Mobile Capture")
+            try fixture.create("bin/main", bundled: false)
+            try FileManager.default.removeItem(at: main)
+            try FileManager.default.createSymbolicLink(at: main, withDestinationURL: fixture.external.appendingPathComponent("bin/main"))
+        }
+        if failure == "escape" {
+            try fixture.create("bin/mobile-capture-host", bundled: false)
+            try FileManager.default.removeItem(at: executable)
+            try FileManager.default.createSymbolicLink(at: executable, withDestinationURL: fixture.external.appendingPathComponent("bin/mobile-capture-host"))
+        }
+        if failure == "directory" {
+            try FileManager.default.removeItem(at: executable)
+            try FileManager.default.createDirectory(at: executable, withIntermediateDirectories: false)
+        }
+        let runner = DoctorFixtureRunner()
+        let result = await CaptureDoctorCLI.run(arguments: ["doctor", "--json", "--platform", "android"],
+            executableURL: executable, service: fixture.service(runner))
+        let value = try json(result)
+        #expect(result.exitCode == 70 && value["appPath"] is NSNull && value["checkedAt"] is NSNull)
+        #expect((value["error"] as? [String: String])?["code"] == "owningApplication")
+        #expect((await runner.commands).isEmpty)
+    }
+
+    @Test func symlinkInvocationFindsResolvedOwner() throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        let host = try application(fixture)
+        let link = fixture.root.appendingPathComponent("host-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: host)
+        #expect(try CaptureDoctorCLI.owningApplication(link) == fixture.bundle.resolvingSymlinksInPath())
+    }
+
+    @Test func stockFileProbeRejectsScriptsContainingArchitectureProse() async throws {
+        let fixture = try DoctorFixture(); defer { fixture.cleanup() }
+        try fixture.create("bin/script", bundled: false)
+        let script = fixture.external.appendingPathComponent("bin/script")
+        try Data("#!/bin/sh\n# Mach-O 64-bit executable arm64 x86_64\nexit 0\n".utf8).write(to: script)
+        let result = try await CaptureDoctorProcessRunner().run(CaptureDoctorCommand(executable: URL(fileURLWithPath: "/usr/bin/file"),
+            arguments: ["-b", script.path], environment: ["PATH": "/usr/bin:/bin", "LC_ALL": "C"]), progress: { _ in })
+        #expect(result.exitCode == 0)
+        #expect(!CaptureDoctorService.isNativeMachO(result.stdout, architecture: "arm64"))
+        #expect(!CaptureDoctorService.isNativeMachO(result.stdout, architecture: "x86_64"))
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["CAPTURE_DOCTOR_TEST_NATIVE_EXECUTABLE"] != nil))
+    func suppliedNativeExecutablePassesStockFileProbe() async throws {
+        let path = try #require(ProcessInfo.processInfo.environment["CAPTURE_DOCTOR_TEST_NATIVE_EXECUTABLE"])
+        let result = try await CaptureDoctorProcessRunner().run(CaptureDoctorCommand(executable: URL(fileURLWithPath: "/usr/bin/file"),
+            arguments: ["-b", path], environment: ["PATH": "/usr/bin:/bin", "LC_ALL": "C"]), progress: { _ in })
+        #expect(result.exitCode == 0 && !result.outputTruncated)
+        #expect(CaptureDoctorService.isNativeMachO(result.stdout, architecture: "arm64"))
+    }
+
+    @Test func stockUniversalADBShorthandRequiresNativeExecutableDescriptor() {
+        let header = "Mach-O universal binary with 2 architectures: [x86_64:Mach-O 64-bit executable x86_64] [arm64]\n"
+        let path = "/tmp/mobile-capture-release-proof-package/Mobile Capture.app/Contents/MacOS/capture-adb"
+        let output = header + path + " (for architecture x86_64):\tMach-O 64-bit executable x86_64\n"
+            + path + " (for architecture arm64):\tMach-O 64-bit executable arm64\n"
+        #expect(CaptureDoctorService.isNativeMachO(output, architecture: "arm64"))
+        #expect(CaptureDoctorService.isNativeMachO(output, architecture: "x86_64"))
+        #expect(!CaptureDoctorService.isNativeMachO(header, architecture: "arm64"))
+        #expect(!CaptureDoctorService.isNativeMachO(header + path + " (for architecture arm64):\tMach-O 64-bit bundle arm64\n", architecture: "arm64"))
+        #expect(!CaptureDoctorService.isNativeMachO(header + "arbitrary Mach-O 64-bit executable arm64 prose\n", architecture: "arm64"))
+    }
+
+    @Test(arguments: ["arm64", "x86_64"])
+    func nativeFileOutputMustDescribeMachO(architecture: String) {
+        #expect(CaptureDoctorService.isNativeMachO("Mach-O 64-bit executable " + architecture + "\n", architecture: architecture))
+        #expect(CaptureDoctorService.isNativeMachO("Mach-O universal binary with 2 architectures: [x86_64:Mach-O 64-bit executable x86_64] [arm64:Mach-O 64-bit executable arm64]\npath (for architecture arm64):\tMach-O 64-bit executable arm64\n", architecture: architecture))
+        for output in [architecture, "a native " + architecture + " program", "POSIX shell script, ASCII text executable arm64 x86_64", "Mach-O 64-bit executable " + architecture + "garbage", "text [" + architecture + ":Mach-O 64-bit executable " + architecture + "]", "Mach-O 64-bit bundle " + architecture] {
+            #expect(!CaptureDoctorService.isNativeMachO(output, architecture: architecture))
+        }
     }
 }

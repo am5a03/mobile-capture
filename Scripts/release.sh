@@ -85,6 +85,7 @@ if (( USB_CANDIDATE )); then
   DOCTOR_OPTIONS+=(--iphone-usb)
 fi
 bash Scripts/test-capture-doctor-bundle.sh "$APP" "${DOCTOR_OPTIONS[@]}"
+bash Scripts/test-agent-doctor-bundle.sh "$APP" --simulator
 ZIP="$ARTIFACT-$VERSION-arm64-$MODE.zip"
 (cd "$DESTINATION" && /usr/bin/ditto -c -k --keepParent "$BUNDLE" "$ZIP")
 if (( NOTARIZE )); then

@@ -10,6 +10,8 @@ import shutil
 import zipfile
 
 TAG = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:alpha|beta|rc)\.[1-9][0-9]*)?")
+ROOT = Path(__file__).resolve().parents[1]
+SUPPORT_ASSETS = {"install.sh": "Scripts/install.sh", "AGENT_SETUP.md": "docs/AGENT_SETUP.md"}
 SIGNING = ("APPLE_CERTIFICATE_P12_BASE64", "APPLE_CERTIFICATE_PASSWORD", "APPLE_TEAM_ID",
            "CAPTURE_BUNDLE_IDENTIFIER", "APPLE_NOTARY_KEY_P8_BASE64", "APPLE_NOTARY_KEY_ID", "APPLE_NOTARY_ISSUER_ID")
 
@@ -56,10 +58,18 @@ def stage(package, output, version, mode):
         raise ValueError("App metadata does not match the requested release")
     if info.get("MobileCaptureDevelopmentIdentity") is not (mode == "development"):
         raise ValueError("App signing mode does not match the requested release")
+    for relative in SUPPORT_ASSETS.values():
+        if not (ROOT / relative).is_file():
+            raise ValueError("Release is missing setup asset: " + relative)
     output.mkdir(parents=True, exist_ok=False)
     name = "MobileCapture-macOS-arm64" + ("-development" if mode == "development" else "") + ".zip"
     shutil.copyfile(source, output / name)
-    (output / "SHA256SUMS").write_text(f"{digest}  {name}\n")
+    checksums = {name: digest}
+    for asset, relative in SUPPORT_ASSETS.items():
+        shutil.copyfile(ROOT / relative, output / asset)
+        checksums[asset] = hashlib.sha256((output / asset).read_bytes()).hexdigest()
+    (output / "install.sh").chmod(0o755)
+    (output / "SHA256SUMS").write_text("".join(f"{checksums[asset]}  {asset}\n" for asset in sorted(checksums)))
     return name
 
 def main():

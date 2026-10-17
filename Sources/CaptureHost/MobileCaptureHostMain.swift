@@ -4,6 +4,12 @@ import Foundation
 struct MobileCaptureHostMain {
     static func main() async {
         let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.first == "doctor" {
+            let result = await CaptureDoctorCLI.run(arguments: arguments)
+            do { try FileHandle.standardOutput.write(contentsOf: result.envelope.json()) }
+            catch { exit(70) }
+            exit(result.exitCode)
+        }
         var directory: URL?
         do {
             guard let action = arguments.first, ["start", "stop", "stop-iphone-tunnel-off", "transfer-ca", "cancel-save", "status", "_supervise", "_worker"].contains(action), arguments.count == 3 else {

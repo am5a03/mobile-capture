@@ -4,6 +4,9 @@ A standalone macOS companion for collecting Android and iOS device logs and full
 HTTP(S) requests/responses in one shared timeline, then exporting one evidence ZIP.
 It is generic and does not require Oh My Android or a company-specific app.
 
+For agent installation, follow the [Agent setup guide](docs/AGENT_SETUP.md) to
+select an authorized release, inspect the installer, and check Mac prerequisites.
+
 Connect a device, choose device logs and/or network capture, start recording,
 reproduce the behavior, then choose **Stop & Save**. Add time markers, filter and
 inspect the timeline, and share the exported package with an engineer. First-run
@@ -92,6 +95,7 @@ Hardware and fresh-Mac acceptance remain separate.
 
 ## Documentation
 
+- [Agent setup from a repository URL](docs/AGENT_SETUP.md)
 - [Capture usage and platform limitations](docs/CAPTURE.md)
 - [Build, dependency packaging and distribution](docs/CAPTURE-DISTRIBUTION.md)
 - [Evidence package format](docs/CAPTURE-PACKAGE.md)

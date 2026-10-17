@@ -66,6 +66,7 @@ nonisolated struct CaptureDoctorService: Sendable {
     var runner: any CaptureDoctorCommandRunning = CaptureDoctorProcessRunner()
     var homeDirectory = FileManager.default.homeDirectoryForCurrentUser
     var trustedExternalRoots: [URL] = [URL(fileURLWithPath: "/opt/homebrew"), URL(fileURLWithPath: "/usr/local")]
+    var trustedSystemRoots: [URL] = [URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/Library/Developer")]
     var architecture = Self.hostArchitecture
     var now: @Sendable () -> Date = { Date() }
     var availableDiskBytes: (@Sendable (URL) -> Int64?)? = nil
@@ -245,7 +246,7 @@ nonisolated struct CaptureDoctorService: Sendable {
         }
         else if bundledExists { path = bundled; source = .bundled }
         else if applicationBundle != nil && definition.repair == .reinstallApp { path = nil; source = .bundled }
-        else { path = externalTool(definition.name, request: request); source = path == nil ? .none : definition.name == "simctl" ? .system : .external }
+        else { path = await externalTool(definition.name, request: request); source = path == nil ? .none : definition.name == "simctl" ? .system : .external }
         func row(_ status: CaptureDoctorStatus, _ message: String, version: String? = nil) -> CaptureDoctorCheck {
             CaptureDoctorCheck(id: definition.name, title: definition.title, status: status, message: message,
                 version: version, path: path?.path ?? bundled?.path, source: source,
@@ -263,9 +264,9 @@ nonisolated struct CaptureDoctorService: Sendable {
             ? "The custom runtime executable has an unsupported location, permissions or file type. Clear its path in Advanced Runtime to use bundled tools, or ask an engineer to choose a supported tool. Doctor did not use a bundled fallback."
             : "The executable has an unsupported location, permissions or file type. Ask an engineer to inspect it or replace the app.") }
         do {
-            let arch = try await run("/usr/bin/lipo", ["-archs", path.path])
+            let arch = try await run("/usr/bin/file", ["-b", path.path])
             guard arch.exitCode == 0, !arch.outputTruncated,
-                  arch.stdout.split(whereSeparator: \.isWhitespace).contains(Substring(architecture)) else {
+                  Self.isNativeMachO(arch.stdout, architecture: architecture) else {
                 return row(.incompatible, "This component does not contain a native \(architecture) executable. Replace it with a compatible app download.")
             }
             let result = try await runner.run(CaptureDoctorCommand(executable: path, arguments: definition.arguments, environment: commandEnvironment), progress: { _ in })
@@ -314,7 +315,21 @@ nonisolated struct CaptureDoctorService: Sendable {
         return applicationBundle.appendingPathComponent(suffix)
     }
 
-    private func externalTool(_ name: String, request: CaptureDoctorRequest) -> URL? {
+    private func externalTool(_ name: String, request: CaptureDoctorRequest) async -> URL? {
+        if name == "simctl" {
+            if let explicit = request.tools[name], explicit.hasPrefix("/"),
+               FileManager.default.isExecutableFile(atPath: explicit) { return URL(fileURLWithPath: explicit) }
+            guard let result = try? await runner.run(CaptureDoctorCommand(executable: URL(fileURLWithPath: "/usr/bin/xcode-select"),
+                arguments: ["--print-path"], environment: commandEnvironment, timeoutSeconds: 5, maximumOutputBytes: 4_096), progress: { _ in }),
+                  result.exitCode == 0, !result.outputTruncated, result.stderr.trimmed.isEmpty else { return nil }
+            let selection = result.stdout.trimmingCharacters(in: .newlines)
+            guard selection.hasPrefix("/"), result.stdout == selection || result.stdout == selection + "\n",
+                  !selection.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else { return nil }
+            var developer = URL(fileURLWithPath: selection)
+            if developer.pathExtension == "app" { developer.appendPathComponent("Contents/Developer") }
+            let candidate = developer.appendingPathComponent("usr/bin/simctl")
+            return FileManager.default.isExecutableFile(atPath: candidate.path) ? candidate : nil
+        }
         let candidates = request.tools[name].map { [$0] } ?? []
         let defaults = trustedExternalRoots.map { $0.appendingPathComponent("bin/" + name).path }
         let android = name == "adb" ? [homeDirectory.appendingPathComponent("Library/Android/sdk/platform-tools/adb").path] : []
@@ -324,10 +339,10 @@ nonisolated struct CaptureDoctorService: Sendable {
     }
 
     private func homebrewExecutable() -> URL? {
-        trustedExternalRoots.map { $0.appendingPathComponent("bin/brew") }.first { safeExecutable($0, source: .external, allowScript: true) }
+        trustedExternalRoots.map { $0.appendingPathComponent("bin/brew") }.first { safeExecutable($0, source: .external) }
     }
 
-    private func safeExecutable(_ file: URL, source: CaptureDoctorSource, allowScript: Bool = false) -> Bool {
+    private func safeExecutable(_ file: URL, source: CaptureDoctorSource) -> Bool {
         guard file.isFileURL, file.path.hasPrefix("/") else { return false }
         let resolved = file.standardizedFileURL.resolvingSymlinksInPath()
         var info = stat()
@@ -335,7 +350,7 @@ nonisolated struct CaptureDoctorService: Sendable {
               info.st_mode & 0o022 == 0, [0, geteuid()].contains(info.st_uid),
               FileManager.default.isExecutableFile(atPath: resolved.path) else { return false }
         let roots: [URL] = if source == .bundled { applicationBundle.map { [$0] } ?? [] }
-        else if source == .system { [URL(fileURLWithPath: "/Applications"), URL(fileURLWithPath: "/Library/Developer")] }
+        else if source == .system { trustedSystemRoots }
         else { trustedExternalRoots + [homeDirectory.appendingPathComponent("Library/Android/sdk/platform-tools")] }
         guard let root = roots.map({ $0.standardizedFileURL.resolvingSymlinksInPath() })
             .first(where: { resolved.path.hasPrefix($0.path + "/") }) else { return false }
@@ -347,8 +362,21 @@ nonisolated struct CaptureDoctorService: Sendable {
             if parent == root { break }
             parent.deleteLastPathComponent()
         }
-        _ = allowScript // Only the fixed Homebrew path may be a script; all tools face lipo next.
         return true
+    }
+
+    static func isNativeMachO(_ output: String, architecture: String) -> Bool {
+        guard ["arm64", "x86_64"].contains(architecture),
+              let firstLine = output.split(whereSeparator: \.isNewline).first else { return false }
+        let thin = "Mach-O 64-bit executable " + architecture
+        if firstLine == Substring(thin) { return true }
+        let universal = #"^Mach-O universal binary with [1-9][0-9]* architectures: (\[[a-z0-9_]+(?::Mach-O 64-bit executable [a-z0-9_]+)?\] ?)+$"#
+        guard firstLine.range(of: universal, options: .regularExpression) != nil else { return false }
+        if firstLine.contains("[" + architecture + ":" + thin + "]") { return true }
+        guard firstLine.contains("[" + architecture + "]") else { return false }
+        return output.split(whereSeparator: \.isNewline).dropFirst().contains {
+            $0.hasSuffix("(for architecture " + architecture + "):\t" + thin)
+        }
     }
 
     private func run(_ path: String, _ arguments: [String]) async throws -> CaptureDoctorCommandResult {
