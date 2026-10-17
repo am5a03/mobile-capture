@@ -47,7 +47,7 @@ def smoke(app, ready):
     host = app / "Contents/MacOS/mobile-capture-host"
     expected = 0 if ready else 10
     with tempfile.TemporaryDirectory(prefix="agent-doctor-smoke-") as directory:
-        work = Path(directory)
+        work = Path(directory).resolve()
         output = work / "sessions"
         output.mkdir(mode=0o700)
         arguments = ["doctor", "--json", "--platform", "android", "--output-directory", str(output)]
