@@ -12,7 +12,7 @@ Candidate A uses the standard updater controller and early exclusive admission. 
 
 The synthesis refines A. A manual check acquires one main-actor admission before calling Sparkle, so existing work wins and new work cannot start during that update attempt. A background check never reserves capture work or offers installation. It records a discovered version and aborts before download. The user can then use Check for Updates while idle. Automatic checking starts off and binds directly to Sparkle's preference when enabled. Automatic download and installation stay disabled. Standard native Sparkle UI owns manual release notes, progress, cancellation and restart. No custom installer or user driver is required.
 
-The update admission owner represents available, checking and installationCommitted. A documented pre-install cancellation releases checking. Installation commitment remains sticky through Dismiss and cycle completion because either can leave install-on-quit armed. Never use canCheckForUpdates or sessionInProgress as proof that replacement is disarmed. Read exact Sparkle2.10 headers before implementing delegate transitions.
+The update admission owner represents available, checking and installationCommitted. Cancellation or failure before extraction releases checking after the cycle confirms it. Once Sparkle reports didExtractUpdate, installation commitment stays sticky through every later finish or dismissal until app exit. Exact2.10 source shows the ready-to-install reply bypasses userDidMakeChoice, so that delegate cannot prove cancellation. The app tells the user a restart is required once the update is ready. This conservative choice also retains the lock after a ready-stage cancellation rather than guessing that the installer is disarmed. Never use canCheckForUpdates or sessionInProgress as proof that replacement is disarmed. Read exact Sparkle2.10 headers before implementing delegate transitions.
 
 ## Safety boundary
 
@@ -49,3 +49,9 @@ A local updater-enabled older build can prove installation from a public beta wi
 ## Independent design judgment
 
 GPT6 Luna recommended the refined A design. Its candidate scores for safety, maintainability, beta UX, publication, installer compatibility and proof were A3/4/2/4/2/4 and B3/2/4/1/4/4. The synthesis fixes A background-check blocking and avoids both candidates installer expansion. The judge required explicit fresh-install ownership acquisition and stage-specific sticky cancellation, incorporated above. It found no need for a custom user driver, mutable beta slot or keeper. The source-only judgment does not replace native app proof.
+
+## Accepted implementation reconciliation
+
+The app owner read SPUUIBasedUpdateDriver.m417-425 and SPUCoreBasedUpdateDriver.m235-250 in the resolved2.10 source. The ready-stage reply goes straight to the core driver without userDidMakeChoice, and installer cancellation has no disarmed acknowledgement suitable for releasing admission. The root accepted didExtractUpdate as the sticky commitment signal. Pre-extraction cancellation releases after cycle completion. All later outcomes require app exit before capture work resumes. This updates the contract before the next unit.
+
+The implementation names the nonclaiming primitive CaptureReadOnlyRoutingLock(validatingIdleOwnerIn:). Its descriptor opens O_RDONLY and holds an exclusive flock. Tests check that existing owner bytes and inode survive the admitted check and release for saved, partial and failed terminal sessions. The host routing lease remains the only record writer.
