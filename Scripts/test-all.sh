@@ -12,6 +12,7 @@ case "${1:-all}" in
     ;;
   services)
     bash Scripts/test-capture-doctor.sh
+    bash Scripts/test-agent-doctor-cli.sh
     bash Scripts/test-capture-setup-store.sh
     bash Scripts/test-native-capture-services.sh
     bash Scripts/test-native-capture-lifecycle.sh

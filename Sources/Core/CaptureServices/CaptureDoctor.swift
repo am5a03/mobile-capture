@@ -263,9 +263,9 @@ nonisolated struct CaptureDoctorService: Sendable {
             ? "The custom runtime executable has an unsupported location, permissions or file type. Clear its path in Advanced Runtime to use bundled tools, or ask an engineer to choose a supported tool. Doctor did not use a bundled fallback."
             : "The executable has an unsupported location, permissions or file type. Ask an engineer to inspect it or replace the app.") }
         do {
-            let arch = try await run("/usr/bin/lipo", ["-archs", path.path])
+            let arch = try await run("/usr/bin/file", ["-b", path.path])
             guard arch.exitCode == 0, !arch.outputTruncated,
-                  arch.stdout.split(whereSeparator: \.isWhitespace).contains(Substring(architecture)) else {
+                  Self.isNativeMachO(arch.stdout, architecture: architecture) else {
                 return row(.incompatible, "This component does not contain a native \(architecture) executable. Replace it with a compatible app download.")
             }
             let result = try await runner.run(CaptureDoctorCommand(executable: path, arguments: definition.arguments, environment: commandEnvironment), progress: { _ in })
@@ -324,10 +324,10 @@ nonisolated struct CaptureDoctorService: Sendable {
     }
 
     private func homebrewExecutable() -> URL? {
-        trustedExternalRoots.map { $0.appendingPathComponent("bin/brew") }.first { safeExecutable($0, source: .external, allowScript: true) }
+        trustedExternalRoots.map { $0.appendingPathComponent("bin/brew") }.first { safeExecutable($0, source: .external) }
     }
 
-    private func safeExecutable(_ file: URL, source: CaptureDoctorSource, allowScript: Bool = false) -> Bool {
+    private func safeExecutable(_ file: URL, source: CaptureDoctorSource) -> Bool {
         guard file.isFileURL, file.path.hasPrefix("/") else { return false }
         let resolved = file.standardizedFileURL.resolvingSymlinksInPath()
         var info = stat()
@@ -347,8 +347,21 @@ nonisolated struct CaptureDoctorService: Sendable {
             if parent == root { break }
             parent.deleteLastPathComponent()
         }
-        _ = allowScript // Only the fixed Homebrew path may be a script; all tools face lipo next.
         return true
+    }
+
+    static func isNativeMachO(_ output: String, architecture: String) -> Bool {
+        guard ["arm64", "x86_64"].contains(architecture),
+              let firstLine = output.split(whereSeparator: \.isNewline).first else { return false }
+        let thin = "Mach-O 64-bit executable " + architecture
+        if firstLine == Substring(thin) { return true }
+        let universal = #"^Mach-O universal binary with [1-9][0-9]* architectures: (\[[a-z0-9_]+(?::Mach-O 64-bit executable [a-z0-9_]+)?\] ?)+$"#
+        guard firstLine.range(of: universal, options: .regularExpression) != nil else { return false }
+        if firstLine.contains("[" + architecture + ":" + thin + "]") { return true }
+        guard firstLine.contains("[" + architecture + "]") else { return false }
+        return output.split(whereSeparator: \.isNewline).dropFirst().contains {
+            $0.hasSuffix("(for architecture " + architecture + "):\t" + thin)
+        }
     }
 
     private func run(_ path: String, _ arguments: [String]) async throws -> CaptureDoctorCommandResult {
