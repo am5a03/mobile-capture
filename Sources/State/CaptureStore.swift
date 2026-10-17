@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 @MainActor
 @Observable
 final class CaptureStore {
+    let updateAdmission: CaptureUpdateAdmission
     let setup: CaptureSetupStore
     let doctor: CaptureDoctorStore
     var isSetupPresented = false
@@ -107,6 +108,8 @@ final class CaptureStore {
     @ObservationIgnored private var windowHasOlder = false
     @ObservationIgnored private var windowHasNewer = false
     @ObservationIgnored private var heldMatchingCount: Int?
+    private var applicationDiscoveryCount = 0
+    private var timelineActionCount = 0
     @ObservationIgnored private var applicationRequest = UUID()
     @ObservationIgnored private var iphoneSetupDeviceID: String?
     @ObservationIgnored private var timelineOperation: Task<Void, Never>?
@@ -117,11 +120,13 @@ final class CaptureStore {
          setupInspector: CaptureSetupInspector = CaptureSetupInspector(),
          discover: @escaping @Sendable (CaptureToolConfiguration) async throws -> NativeCaptureDiscoveryResult = { configuration in
              try await NativeCaptureDiscovery().discover(configuration: configuration)
-         }, doctor: CaptureDoctorStore? = nil) {
+         }, doctor: CaptureDoctorStore? = nil, updateAdmission: CaptureUpdateAdmission? = nil) {
+        let updateAdmission = updateAdmission ?? CaptureUpdateAdmission()
+        self.updateAdmission = updateAdmission
         self.doctor = doctor ?? CaptureDoctorStore()
         self.hostExecutable = hostExecutable
         self.setupInspector = setupInspector
-        self.setup = CaptureSetupStore(inspector: setupInspector)
+        self.setup = CaptureSetupStore(inspector: setupInspector, updateAdmission: updateAdmission)
         self.discover = discover
         self.outputRoot = outputRoot ?? UserDefaults.standard.string(forKey: "capture.sessionsRoot").map { URL(fileURLWithPath: $0, isDirectory: true) }
             ?? CaptureSessionRegistry.defaultRoot
@@ -129,10 +134,19 @@ final class CaptureStore {
         if let rememberedPlanDefaults { setup.loadProgress(defaults: rememberedPlanDefaults) }
     }
 
+    var updateBlocker: CaptureUpdateBlocker? {
+        if hasOwnActiveCapture { return .capture }
+        if session?.needsPackageRetry == true { return .save }
+        if isBusy || isAddingMarker || applicationDiscoveryCount > 0 || isLoadingTimeline || isLoadingSelectedEvent
+            || timelineActionCount > 0 || refreshInFlight || timelineOperation != nil || doctor.hasOperation || setup.hasOperation { return .operation }
+        return setup.checkCapture?.updateBlocker
+    }
+
     var selectedDevice: CaptureDevice? { devices.first { $0.selectionID == selectedDeviceID } }
     /// Only an explicit device picker action requests installed-app access. Loading saved metadata
     /// and copying a check's selection must not initiate a phone pairing handshake.
     func selectDeviceForCapture(_ selectionID: String) {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !hasActiveCapture, !doctor.isRepairing else { return }
         selectedDeviceID = selectionID
         Task { [weak self] in await self?.refreshApplications() }
@@ -143,7 +157,7 @@ final class CaptureStore {
     var operationSession: CaptureSession? { setup.checkCapture?.hasActiveCapture == true ? setup.checkCapture?.session : session }
     var isOperationBusy: Bool { isBusy || setup.isLaunchingCheck || setup.isPreparingCertificate || (setup.checkCapture?.hasActiveCapture == true && setup.checkCapture?.isBusy == true) }
     var canStart: Bool {
-        !isBusy && !hasActiveCapture && !doctor.isRepairing && selectedDevice?.isReady == true && (captureLogs || captureNetwork)
+        updateAdmission.allowsCaptureWork && !isBusy && !hasActiveCapture && !doctor.isRepairing && selectedDevice?.isReady == true && (captureLogs || captureNetwork)
             && !(captureNetwork && selectedDevice?.platform == "simulator" && networkService.isEmpty)
             && !(captureNetwork && selectedDevice?.platform == "iphone" && iphoneTunnelConfiguration == nil)
             && !(captureLogs && selectedDevice?.platform == "iphone" && toolPath("idevicesyslog") == nil)
@@ -222,12 +236,17 @@ final class CaptureStore {
     var isSaving: Bool { isStopping || (session?.phase == "stopping" && session?.routingRestored != false) }
 
     func refreshApplications() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !hasActiveCapture, let device = selectedDevice, device.isReady else { return }
         let request = UUID(), selection = selectedDeviceID
         applicationRequest = request
         isLoadingApplications = true
+        applicationDiscoveryCount += 1
         applicationDiscoveryError = nil
-        defer { if applicationRequest == request { isLoadingApplications = false } }
+        defer {
+            applicationDiscoveryCount -= 1
+            if applicationRequest == request { isLoadingApplications = false }
+        }
         do {
             let found = try await CaptureLogDiscovery().applications(device: device, tools: tools.compactMapValues { $0 })
             guard applicationRequest == request, selectedDeviceID == selection, !hasActiveCapture else { return }
@@ -239,6 +258,7 @@ final class CaptureStore {
     }
 
     func loadIPhoneSetup() {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !hasActiveCapture else { return }
         guard let device = selectedDevice, device.platform == "iphone" else {
             iphoneSetupDeviceID = nil; iphoneTunnelConfiguration = nil
@@ -260,6 +280,7 @@ final class CaptureStore {
 
     @discardableResult
     func prepareIPhoneSetup() -> Bool {
+        guard updateAdmission.allowsCaptureWork else { return false }
         guard let device = selectedDevice, device.platform == "iphone" else { return false }
         if hasActiveCapture { return iphoneTunnelConfiguration != nil }
         do {
@@ -269,6 +290,7 @@ final class CaptureStore {
     }
 
     func refreshDevices(includeApplications: Bool = true, allowSetupCheck: Bool = false) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !isBusy, !hasOwnActiveCapture, !doctor.isRepairing,
               allowSetupCheck || !setup.hasLiveCheck else { return }
         isBusy = true
@@ -299,6 +321,7 @@ final class CaptureStore {
 
     /// External context is a suggestion. Never replace a recording, inspected session or unavailable target.
     func applyExternalSelection(platform: String, deviceID: String, applicationID: String?) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !preserveContextDuringDoctorRepair() else { return }
         guard session == nil, !hasActiveCapture, !isBusy, !isSetupPresented else {
             externalRequestNotice = "A companion requested \(applicationID ?? platform) on device \(deviceID). Your current session and selection remain open."
@@ -326,6 +349,7 @@ final class CaptureStore {
     }
 
     func openSession() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !isBusy, !hasActiveCapture, !doctor.isRepairing else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -340,6 +364,7 @@ final class CaptureStore {
 
     /// Opening and inspecting evidence requires no Python process or installed capture tools.
     func loadSession(at directory: URL) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !isBusy, !hasActiveCapture, !doctor.isRepairing else { return }
         isSetupPresented = false
         isBusy = true
@@ -432,6 +457,7 @@ final class CaptureStore {
     }
 
     func stop() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         if let check = setup.checkCapture, check.hasActiveCapture {
             await setup.stopCheck()
             return
@@ -481,6 +507,7 @@ final class CaptureStore {
     }
 
     func cancelSave() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard canCancelSave, let current = session else { return }
         isCancellingSave = true
         do {
@@ -489,6 +516,7 @@ final class CaptureStore {
     }
 
     func addMarker() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !isBusy, !isAddingMarker, session?.phase == "recording", let index, let text = nonempty(markerText) else { return }
         let clickedAt = Date()
         isAddingMarker = true
@@ -517,7 +545,7 @@ final class CaptureStore {
 
     /// Keep the inspected session and its viewport intact while a short check records separately.
     func makeSetupCheck() -> CaptureStore {
-        let check = CaptureStore(hostExecutable: hostExecutable, setupInspector: setupInspector, discover: discover)
+        let check = CaptureStore(hostExecutable: hostExecutable, setupInspector: setupInspector, discover: discover, updateAdmission: updateAdmission)
         check.outputRoot = outputRoot
         check.devices = devices; check.tools = tools; check.networkServices = networkServices
         check.didDiscover = didDiscover; check.discoveryCheckedAt = discoveryCheckedAt
@@ -533,12 +561,14 @@ final class CaptureStore {
     }
 
     func showSetup() {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !doctor.isRepairing else { return }
         isDoctorPresented = false
         isSetupPresented = true
         if !setup.hasLiveCheck { setup.step = .choose }
     }
     func showDoctor() {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !setup.hasLiveCheck else { return }
         isDoctorPresented = true
     }
@@ -552,6 +582,7 @@ final class CaptureStore {
     }
 
     func transferSetupCertificate() async throws {
+        guard updateAdmission.allowsCaptureWork else { throw CaptureUpdateBlocker.updating }
         guard let session, session.platform == "android", session.isActive, captureNetwork else {
             throw AppError("Start an Android network check before copying its public certificate.")
         }
@@ -591,13 +622,14 @@ final class CaptureStore {
     }
 
     func chooseOutputRoot() {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !hasActiveCapture, !isBusy, !doctor.isRepairing else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.message = "Choose a local folder for capture sessions. Full request bodies and logs may contain private data."
-        if panel.runModal() == .OK, let url = panel.url, !doctor.isRepairing, !hasActiveCapture, !isBusy {
+        if panel.runModal() == .OK, let url = panel.url, updateAdmission.allowsCaptureWork, !doctor.isRepairing, !hasActiveCapture, !isBusy {
             outputRoot = url
             UserDefaults.standard.set(url.path, forKey: "capture.sessionsRoot")
         }
@@ -620,13 +652,14 @@ final class CaptureStore {
     }
 
     func exportPackage() {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard let path = session?.packagePath else { return }
         let source = URL(fileURLWithPath: path)
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.zip]
         panel.nameFieldStringValue = source.lastPathComponent
         panel.message = "Export a copy of the evidence package. Review private requests, bodies and logs before sharing."
-        guard panel.runModal() == .OK, let target = panel.url, target.standardizedFileURL != source.standardizedFileURL else { return }
+        guard panel.runModal() == .OK, updateAdmission.allowsCaptureWork, let target = panel.url, target.standardizedFileURL != source.standardizedFileURL else { return }
         do {
             // NSSavePanel authorizes replacement when its destination already exists.
             if FileManager.default.fileExists(atPath: target.path) { try FileManager.default.removeItem(at: target) }
@@ -752,6 +785,7 @@ final class CaptureStore {
     }
 
     private func loadSelectedEvent() {
+        guard updateAdmission.allowsCaptureWork else { return }
         detailTask?.cancel()
         detailRequest = UUID()
         let request = detailRequest
@@ -776,6 +810,7 @@ final class CaptureStore {
     }
 
     private func scheduleTimelineRefresh() {
+        guard updateAdmission.allowsCaptureWork else { return }
         queryRevision &+= 1
         timelineTask?.cancel()
         timelineOperation?.cancel()
@@ -798,6 +833,7 @@ final class CaptureStore {
     }
 
     private func refreshTimeline(mode: RefreshMode) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         if mode == .poll, timelineOperation != nil { return }
         if mode != .poll { timelineOperation?.cancel() }
         let operationID = UUID()
@@ -816,6 +852,7 @@ final class CaptureStore {
     }
 
     private func performTimelineRefresh(mode: RefreshMode) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         let token = sessionToken, revision = queryRevision
         if mode == .poll, refreshInFlight { return }
         while refreshInFlight {
@@ -930,7 +967,10 @@ final class CaptureStore {
     }
 
     func togglePauseView() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard let index else { return }
+        timelineActionCount += 1
+        defer { timelineActionCount -= 1 }
         let token = sessionToken
         do {
             if isViewPaused { pauseThroughSequence = nil; isViewPaused = false }
@@ -946,7 +986,10 @@ final class CaptureStore {
     }
 
     func clearView() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard let index else { return }
+        timelineActionCount += 1
+        defer { timelineActionCount -= 1 }
         let token = sessionToken
         do {
             let snapshot = try await index.refresh(mode: .live)
@@ -977,6 +1020,7 @@ final class CaptureStore {
     }
 
     func toggleBackgroundIndexing() {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard session?.isActive != true, pendingTimelineBytes > 0 else { return }
         isIndexingPaused.toggle()
         if isIndexingPaused {

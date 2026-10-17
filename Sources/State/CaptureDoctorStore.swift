@@ -43,6 +43,7 @@ final class CaptureDoctorStore {
     var hasOperation: Bool { isChecking || isPreparingPreview || isRepairing }
 
     func selectDeviceType(_ type: DeviceType, owner: CaptureStore) {
+        guard owner.updateAdmission.allowsCaptureWork else { return }
         guard owner.selectedDevice == nil, !owner.hasActiveCapture, !owner.isBusy, !hasOperation else { return }
         guard deviceType != type else { return }
         dismissPreview()
@@ -65,10 +66,11 @@ final class CaptureDoctorStore {
     }
 
     func refresh(_ owner: CaptureStore, force: Bool = false) async {
+        guard owner.updateAdmission.allowsCaptureWork else { return }
         while isChecking {
             do { try await Task.sleep(for: .milliseconds(25)) } catch { return }
         }
-        guard !isRepairing, !Task.isCancelled else { return }
+        guard owner.updateAdmission.allowsCaptureWork, !isRepairing, !Task.isCancelled else { return }
         let token = UUID()
         let configuration = configurationKey(owner)
         if !force, report != nil, reportConfiguration == configuration { return }
@@ -82,6 +84,7 @@ final class CaptureDoctorStore {
     }
 
     func prepareRepair(_ repair: CaptureDoctorRepair, owner: CaptureStore) async {
+        guard owner.updateAdmission.allowsCaptureWork else { return }
         guard !owner.hasActiveCapture, !owner.isBusy, !hasOperation else { return }
         let token = UUID()
         revision = token
@@ -102,6 +105,7 @@ final class CaptureDoctorStore {
     }
 
     func beginRepair(_ owner: CaptureStore) {
+        guard owner.updateAdmission.allowsCaptureWork else { return }
         guard !owner.hasActiveCapture, !owner.isBusy, !hasOperation,
               let repair = selectedRepair, preview?.canRun == true,
               repairConfiguration == configurationKey(owner) else { return }

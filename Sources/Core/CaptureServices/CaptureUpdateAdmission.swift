@@ -18,6 +18,7 @@ enum CaptureUpdateBlocker: String, Error, LocalizedError {
 final class CaptureUpdateAdmission {
     enum State { case available, checking, installationCommitted }
     private(set) var state = State.available
+    private(set) var pendingVersion: String?
     @ObservationIgnored private var lease: CaptureUpdateOwnershipLease?
 
     var allowsCaptureWork: Bool { state == .available }
@@ -31,10 +32,21 @@ final class CaptureUpdateAdmission {
     }
 
     func validate(blocker: CaptureUpdateBlocker?, otherInstance: Bool) throws {
-        guard state == .checking, lease != nil else { throw CaptureUpdateBlocker.updating }
+        guard state != .available, lease != nil else { throw CaptureUpdateBlocker.updating }
         if let blocker { throw blocker }
         guard !otherInstance else { throw CaptureUpdateBlocker.otherInstance }
     }
+
+    func shouldProceed(version: String, manual: Bool, blocker: CaptureUpdateBlocker?, otherInstance: Bool) throws {
+        guard manual else {
+            pendingVersion = version
+            throw AppError("An update is available. Choose Check for Updates when capture work is finished.")
+        }
+        try validate(blocker: blocker, otherInstance: otherInstance)
+        pendingVersion = nil
+    }
+
+    func noUpdateFound() { pendingVersion = nil }
 
     func commitInstallation() {
         guard state == .checking else { return }

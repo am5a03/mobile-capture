@@ -35,6 +35,7 @@ final class CaptureSetupStore {
     private(set) var isCertificatePreparation = false
     private(set) var certificateWasCopied = false
     private(set) var certificatePreparationDeviceID: String?
+    let updateAdmission: CaptureUpdateAdmission
     @ObservationIgnored private let inspector: CaptureSetupInspector
     @ObservationIgnored private var checkDeadline: Task<Void, Never>?
     @ObservationIgnored private var reportRevision = UUID()
@@ -47,7 +48,14 @@ final class CaptureSetupStore {
     private static let progressKey = "capture.setup.devices.v1"
     private static let offeredKey = "capture.setup.offered.v1"
 
-    init(inspector: CaptureSetupInspector = CaptureSetupInspector()) { self.inspector = inspector }
+    init(inspector: CaptureSetupInspector = CaptureSetupInspector(), updateAdmission: CaptureUpdateAdmission? = nil) {
+        self.inspector = inspector
+        self.updateAdmission = updateAdmission ?? CaptureUpdateAdmission()
+    }
+
+    var hasOperation: Bool {
+        isInspecting || isLaunchingCheck || isPreparingCertificate || isTransferringCertificate || isExportingReport
+    }
 
     var hasLiveCheck: Bool { isLaunchingCheck || isPreparingCertificate || checkCapture?.hasActiveCapture == true }
     var verificationCapture: CaptureStore? { isCertificatePreparation ? nil : checkCapture }
@@ -76,6 +84,7 @@ final class CaptureSetupStore {
     }
 
     func offerFirstRunIfNeeded(_ owner: CaptureStore) {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !firstRunOffered, !owner.hasActiveCapture, !owner.isBusy, owner.session == nil,
               !owner.isDoctorPresented else { return }
         firstRunOffered = true
@@ -86,6 +95,7 @@ final class CaptureSetupStore {
     }
 
     func selectOnlyReadyDevice(_ owner: CaptureStore) {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard owner.selectedDeviceID.isEmpty, !owner.hasActiveCapture else { return }
         let ready = owner.devices.filter(\.isReady)
         if ready.count == 1 { owner.selectedDeviceID = ready[0].selectionID }
@@ -101,6 +111,7 @@ final class CaptureSetupStore {
     }
 
     func canCheckConnection(_ owner: CaptureStore) -> Bool {
+        guard updateAdmission.allowsCaptureWork else { return false }
         if !isLaunchingCheck, !isPreparingCertificate, !isCertificatePreparation,
            let check = checkCapture, check.session?.platform == "iphone", check.hasActiveCapture,
            checkOwnerConfiguration == configurationKey(owner) { return true }
@@ -112,6 +123,7 @@ final class CaptureSetupStore {
 
     @discardableResult
     func completeSetup(_ owner: CaptureStore) async -> Bool {
+        guard updateAdmission.allowsCaptureWork else { return false }
         guard !hasLiveCheck, !isCertificatePreparation, let check = checkCapture,
               check.session?.routingRestored == true,
               checkOwnerConfiguration == configurationKey(owner) else { return false }
@@ -164,12 +176,13 @@ final class CaptureSetupStore {
     }
 
     func exportReadinessReport() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard let report, !isExportingReport else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.zip]
         panel.nameFieldStringValue = "Mobile-Capture-Setup-Report.zip"
         panel.message = "Save a setup report for your engineer. It includes named readiness checks without recorded requests, logs, private keys or tunnel profiles."
-        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        guard panel.runModal() == .OK, updateAdmission.allowsCaptureWork, let destination = panel.url else { return }
         isExportingReport = true
         defer { isExportingReport = false }
         do {
@@ -195,12 +208,13 @@ final class CaptureSetupStore {
     }
 
     func inspect(_ owner: CaptureStore) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         // A newer configuration must wait for the bounded read, rather than be dropped while
         // SwiftUI cancels an older .task(id:) inspection during a quick device switch.
         while isInspecting {
             do { try await Task.sleep(for: .milliseconds(20)) } catch { return }
         }
-        guard !Task.isCancelled else { return }
+        guard updateAdmission.allowsCaptureWork, !Task.isCancelled else { return }
         let requestedConfiguration = configurationKey(owner)
         let revision = UUID()
         reportRevision = revision
@@ -242,6 +256,7 @@ final class CaptureSetupStore {
     }
 
     func startCheck(_ owner: CaptureStore) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !owner.hasOwnActiveCapture, !owner.isBusy, !owner.doctor.isRepairing,
               !isLaunchingCheck, !isPreparingCertificate else { return }
         await owner.refreshDevices(includeApplications: false, allowSetupCheck: true)
@@ -266,11 +281,13 @@ final class CaptureSetupStore {
     }
 
     func startIPhonePreparation(_ owner: CaptureStore) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard owner.selectedDevice?.platform == "iphone", canCheckConnection(owner) else { return }
         await launchNetworkCheck(owner, timed: false)
     }
 
     private func launchNetworkCheck(_ owner: CaptureStore, timed: Bool) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         error = nil; notice = nil
         isCertificatePreparation = false
         let check = owner.makeSetupCheck()
@@ -329,6 +346,7 @@ final class CaptureSetupStore {
     /// Certificate preparation has no phone-side deadline. It briefly uses the existing host to
     /// create/read its stable public CA, copies it, then restores routing before installation help.
     func prepareAndroidCertificate(_ owner: CaptureStore) async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard !owner.hasActiveCapture, !owner.isBusy, owner.selectedDevice?.platform == "android",
               owner.selectedDevice?.isReady == true else { return }
         error = nil; notice = nil
@@ -398,6 +416,7 @@ final class CaptureSetupStore {
     }
 
     func transferCertificate() async {
+        guard updateAdmission.allowsCaptureWork else { return }
         guard let checkCapture, !isTransferringCertificate else { return }
         isTransferringCertificate = true
         defer { isTransferringCertificate = false }

@@ -28,6 +28,7 @@ struct CaptureView: View {
                 }
             }
         }
+        .disabled(!store.updateAdmission.allowsCaptureWork)
         .frame(minWidth: 960, minHeight: 680)
         .task(id: store.setup.configurationKey(store)) {
             if !store.isSetupPresented, !store.isDoctorPresented { await store.setup.inspect(store) }

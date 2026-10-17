@@ -2,10 +2,11 @@ import SwiftUI
 
 struct MobileCaptureSettingsView: View {
     @Bindable var store: CaptureStore
+    @Bindable var updater: MobileCaptureUpdater
     var showCapture: () -> Void
     private let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development"
 
-    private let isDevelopment = Bundle.main.object(forInfoDictionaryKey: "MobileCaptureDevelopmentIdentity") as? Bool ?? true
+    private let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
 
     var body: some View {
         Form {
@@ -15,7 +16,7 @@ struct MobileCaptureSettingsView: View {
                 HStack {
                     Button("Device Setup…", systemImage: "iphone") { store.showSetup(); showCapture() }
                     Button("Doctor…", systemImage: "stethoscope") { store.showDoctor(); showCapture() }
-                }.disabled(store.hasActiveCapture || store.isBusy || store.doctor.isRepairing)
+                }.disabled(!store.updateAdmission.allowsCaptureWork || store.hasActiveCapture || store.isBusy || store.doctor.isRepairing)
                 Text("Phone certificate approval and iPhone full trust are completed on the phone. Setup includes a separate HTTPS connection check.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -24,17 +25,24 @@ struct MobileCaptureSettingsView: View {
                     Text(store.outputRoot.path).lineLimit(2).truncationMode(.middle).textSelection(.enabled)
                 }
                 Button("Choose Folder…") { store.chooseOutputRoot() }
-                    .disabled(store.hasActiveCapture || store.isBusy || store.doctor.isRepairing)
+                    .disabled(!store.updateAdmission.allowsCaptureWork || store.hasActiveCapture || store.isBusy || store.doctor.isRepairing)
                 Text("Existing sessions, certificates and iPhone tunnel profiles stay in their current locations.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section(isDevelopment ? "Development Build" : "Updates") {
-                LabeledContent("Version", value: version)
-                Text(isDevelopment ? "Automatic updates are disabled. This app uses a provisional local development identity." : "Automatic updates are disabled. Install reviewed builds from the project’s distribution instructions.")
+            Section("Updates") {
+                LabeledContent("Version", value: "\(version) (\(build))")
+                if let tag = updater.releaseTag { LabeledContent("Beta Release", value: tag) }
+                if updater.isEnabled {
+                    Toggle("Automatically Check for Updates", isOn: $updater.automaticallyChecksForUpdates)
+                        .toggleStyle(.checkbox)
+                    Button("Check for Updates…") { updater.checkForUpdates() }
+                        .disabled(!updater.canCheck)
+                }
+                Text(updater.explanation)
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 560, height: 430)
+        .frame(width: 560, height: 520)
     }
 }

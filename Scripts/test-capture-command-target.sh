@@ -11,6 +11,7 @@ cp "$repoRoot/Tests/CaptureCommandTargetTests.swift" "$work/Tests/CaptureCommand
 cat > "$work/Sources/CaptureCommandTargetKit/CaptureStore.swift" <<'SWIFT'
 import Observation
 @MainActor @Observable final class CaptureStore {
+    let updateAdmission = CaptureUpdateAdmission()
     var isBusy = false
     var hasActiveCapture = false
     var canStart = false
@@ -44,6 +45,7 @@ import Observation
     func loadOlderEvents() async {}
     func loadNewerEvents() async {}
 }
+@MainActor final class CaptureUpdateAdmission { var allowsCaptureWork = true }
 struct CaptureSession {
     var isActive = false
     var canFinalize = false

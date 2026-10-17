@@ -15,8 +15,9 @@ struct MobileCaptureApplication {
 }
 
 @MainActor
-final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
+final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let capture = CaptureWindowController()
+    private lazy var updater = MobileCaptureUpdater(store: capture.store)
     private var settingsWindow: NSWindow?
     private var awaitingCaptureStop = false
     private var didLaunch = false
@@ -24,6 +25,12 @@ final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
     private var handoffTask: Task<Void, Never>?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if let existing = MobileCaptureUpdater.otherRunningInstance() {
+            existing.activate(options: [.activateAllWindows])
+            NSApp.terminate(nil)
+            return
+        }
+        _ = updater
         installMenus()
         didLaunch = true
         capture.show(discoverDevices: pendingURLs.isEmpty)
@@ -73,6 +80,9 @@ final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if !capture.store.updateAdmission.allowsCaptureWork {
+            return capture.store.updateBlocker == nil ? .terminateNow : .terminateCancel
+        }
         guard capture.hasActiveCapture || capture.store.doctor.isRepairing else { return .terminateNow }
         guard !awaitingCaptureStop else { return .terminateLater }
         awaitingCaptureStop = true
@@ -95,11 +105,11 @@ final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showCapture() { capture.show() }
     @objc private func showSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 430),
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Mobile Capture Settings"
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: MobileCaptureSettingsView(store: capture.store, showCapture: { [weak self] in
+            window.contentView = NSHostingView(rootView: MobileCaptureSettingsView(store: capture.store, updater: updater, showCapture: { [weak self] in
                 self?.settingsWindow?.orderOut(nil)
                 self?.capture.show()
             }))
@@ -110,12 +120,19 @@ final class MobileCaptureAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
     }
 
+    @objc private func checkForUpdates() { updater.checkForUpdates() }
+
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        item.action == #selector(checkForUpdates) ? updater.canCheck : true
+    }
+
     private func installMenus() {
         let main = NSMenu()
         let application = NSMenu(title: "Mobile Capture")
         add("About Mobile Capture", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), target: NSApp, to: application)
         application.addItem(.separator())
         add("Settings…", action: #selector(showSettings), key: ",", target: self, to: application)
+        add("Check for Updates…", action: #selector(checkForUpdates), target: self, to: application)
         application.addItem(.separator())
         let services = NSMenu(title: "Services")
         let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
