@@ -303,9 +303,25 @@ explicitly produces only the signed build. No Developer ID Application identity
 was available for this checkpoint, so actual Developer ID signing and Apple
 notarization remain unverified.
 
-The standalone capture app does not link Sparkle or inherit Oh My Android’s
-updater. Updates stay disabled. Configure an independent updater/feed/signing key
-before adding automatic updates. Supplying `CAPTURE_BUNDLE_IDENTIFIER` sets the
+The standalone capture app links pinned Sparkle 2.10.0 for its independent
+internal beta updater. Ordinary builds keep updates disabled. Explicit beta-tag
+packaging seals the public policy in `Dependencies/Sparkle/beta-updates.json`
+before signing. Automatic checks start off, and automatic downloads and
+installation remain disabled. Manual checks use Sparkle's native interface and
+reserve the app while it is idle. Capture, save, recovery, setup, and Doctor work
+block installation.
+
+Actions publishes the final ZIP. A separate local command signs those exact
+public bytes and the appcast with the existing Keychain account, then publishes
+only signed public metadata. No private beta key enters Actions. Follow
+[publish an internal beta update](BETA-UPDATES.md) for this required local step.
+`v0.1.1-beta.1` needs a one-time install because it has no updater.
+
+Sparkle replaces the app in place. The exact-tag installer's parent directory
+then records installation origin, while the app's metadata records its current
+version. Re-running the old exact-tag installer safely returns conflict `73`.
+Another exact tag can be installed separately. The installer and its three-entry
+checksum manifest remain unchanged. Supplying `CAPTURE_BUNDLE_IDENTIFIER` sets the
 capture app, native helpers and nested network-engine identities for a release
 build. Set the same value when building Oh My Android to configure automatic
 companion discovery; its **Choose App…** setting can select any compatible

@@ -82,7 +82,13 @@ if [[ "$MODE" == release ]]; then SIGN+=(--options runtime --timestamp)
 else SIGN+=(--options 0 --timestamp=none)
 fi
 python3 -B Scripts/configure-beta-updates.py sign-list --app "$APP" > "$DESTINATION/sparkle-sign-list.txt"
-while IFS= read -r nested; do "${SIGN[@]}" "$nested"; done < "$DESTINATION/sparkle-sign-list.txt"
+while IFS= read -r nested; do
+  if [[ "$nested" == */Downloader.xpc ]]; then
+    "${SIGN[@]}" --preserve-metadata=entitlements "$nested"
+  else
+    "${SIGN[@]}" "$nested"
+  fi
+done < "$DESTINATION/sparkle-sign-list.txt"
 while IFS= read -r nested; do /usr/bin/codesign --verify --deep --strict "$nested"; done < "$DESTINATION/sparkle-sign-list.txt"
 for helper in mobile-capture-host mobile-capture-proxy; do "${SIGN[@]}" "$APP/Contents/MacOS/$helper"; done
 "${SIGN[@]}" --entitlements "$ENTITLEMENTS" "$APP"

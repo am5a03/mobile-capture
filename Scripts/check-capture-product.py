@@ -26,8 +26,9 @@ if args.product == "capture":
     require(info.get("CFBundleDisplayName") == "Mobile Capture", "Capture product has the wrong display identity")
     require(info.get("MobileCaptureCompanion") is True, "Capture companion metadata is missing")
     require(1 in info.get("MobileCaptureHandoffVersions", []), "Launch handoff version is missing")
-    validate_info(info, policy())
-    validate_framework(app, policy())
+    config = policy()
+    validate_info(info, config)
+    validate_framework(app, config)
     for helper in ("mobile-capture-host", "mobile-capture-proxy"):
         require(executable(helper), f"Missing capture helper: {helper}")
     require(not (macos / "ohmyandroid-mcp").exists(), "Capture product unexpectedly embeds the Android MCP")

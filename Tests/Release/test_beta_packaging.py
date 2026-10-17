@@ -89,3 +89,16 @@ class BetaPackagingTests(unittest.TestCase):
         self.info.update(CaptureDistributionUpdatesEnabled=False, SUFeedURL=self.config["feedURL"])
         with self.assertRaisesRegex(ValueError, "Disabled"):
             beta.validate_info(self.info, self.config)
+
+    def test_framework_smoke_requires_the_pinned_version_and_nested_code(self):
+        framework = self.app / "Contents/Frameworks/Sparkle.framework"
+        resources = framework / "Versions/B/Resources"
+        resources.mkdir(parents=True)
+        metadata = resources / "Info.plist"
+        metadata.write_bytes(plistlib.dumps({"CFBundleShortVersionString": self.config["sparkleVersion"]}))
+        for relative in beta.SPARKLE_CODE[:-1]:
+            (framework / relative).mkdir(parents=True, exist_ok=True)
+        self.assertEqual(len(beta.validate_framework(self.app, self.config)), 5)
+        metadata.write_bytes(plistlib.dumps({"CFBundleShortVersionString": "2.9.0"}))
+        with self.assertRaisesRegex(ValueError, "version"):
+            beta.validate_framework(self.app, self.config)

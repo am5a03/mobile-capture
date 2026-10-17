@@ -11,8 +11,8 @@ currently require macOS 26.
 From the tested commit on `main`, create and push a prerelease tag:
 
 ```sh
-git tag v0.1.1-beta.1
-git push origin v0.1.1-beta.1
+git tag v0.1.2-beta.1
+git push origin v0.1.2-beta.1
 ```
 
 Wait for **Downloadable release** in Actions to finish. The `alpha`, `beta` or `rc`
@@ -23,13 +23,19 @@ The release's Assets section then contains
 `SHA256SUMS`. Checksums cover the ZIP, installer and guide. The ZIP includes
 mitmproxy, its Python interpreter and Android tools. Physical iPhone USB tools
 remain external in this ordinary package. Simulator capture requires Xcode.
-The app's numeric version comes from the tag, so `v0.1.1-beta.1` builds app version
-`0.1.1`. The release workflow run number supplies the app build number.
+The app's numeric version comes from the tag, so `v0.1.2-beta.1` builds app version
+`0.1.2`. The release workflow computes the app build as `run_number * 1000 + run_attempt`.
 
 Development prereleases are ad-hoc signed and not notarized. State that limitation
 in the release notes. They are for testers who trust this project. macOS can block
 them. [Apple explains how downloaded apps are checked](https://support.apple.com/en-us/102445).
 A development prerelease is available without Apple signing credentials.
+
+Beta tags enable the independent Sparkle updater. After Actions publishes the
+final archive, complete [the local signed-feed procedure](BETA-UPDATES.md) to
+advertise it as an update. The private beta key stays in local Keychain. Alpha,
+release candidate, and stable tags do not enable the internal beta feed.
+`v0.1.1-beta.1` needs a one-time install to gain the updater.
 
 ## Configure stable release signing
 
