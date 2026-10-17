@@ -21,17 +21,23 @@ jobs:
         run: bash Scripts/test-all.sh "${{ matrix.group }}"
   build:
     runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      CAPTURE_RELEASE_VERSION: 0.0.${{ github.run_number }}
+      CAPTURE_BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set package paths
+        run: |
+          echo "CAPTURE_DEPENDENCY_CACHE=$RUNNER_TEMP/capture-dependencies" >> "$GITHUB_ENV"
+          echo "CAPTURE_ARTIFACT_DIRECTORY=$RUNNER_TEMP/capture-package" >> "$GITHUB_ENV"
       - name: Install XcodeGen
         run: brew install xcodegen
-      - name: Generate standalone project
-        run: xcodegen generate
-      - name: Build app and native helpers (warnings are errors)
+      - name: Prepare reviewed dependencies from official archives
+        run: python3 -B Scripts/prepare-capture-cache.py --cache-root "$CAPTURE_DEPENDENCY_CACHE"
+      - name: Build, sign and verify complete development package
+        run: Scripts/release-mobile-capture.sh --development
+      - name: Verify the exact user-download ZIP and version
         run: |
-          xcodebuild -project MobileCapture.xcodeproj -scheme MobileCapture -configuration Release \
-            -derivedDataPath build/DerivedData CODE_SIGN_IDENTITY=- build
-      - name: Check standalone product boundary
-        run: |
-          python3 -B Scripts/check-capture-product.py --product capture \
-            --app "build/DerivedData/Build/Products/Release/Mobile Capture.app" --allow-unbundled-dependencies
+          python3 -B Scripts/release-assets.py stage --package "$CAPTURE_ARTIFACT_DIRECTORY" \
+            --output "$RUNNER_TEMP/release-assets" --version "$CAPTURE_RELEASE_VERSION" --mode development

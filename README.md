@@ -17,10 +17,22 @@ app-scoped and bounded by default; network capture retains full admitted bodies.
 The upper **Capture Details** panel scrolls and collapses while preserving the
 timeline's reading position and selected event.
 
+## Download and open
+
+Open [Releases](https://github.com/am5a03/mobile-capture/releases) and download the
+app ZIP under Assets. Unzip it, move **Mobile Capture.app** into **Applications**,
+and open it to begin Device Setup. Current packages require Apple Silicon and
+macOS 26. A release becomes visible after its verified app ZIP is attached.
+
+Stable releases use `MobileCapture-macOS-arm64.zip`. Development prereleases use
+`MobileCapture-macOS-arm64-development.zip` and are not notarized. The release
+workflow needs to be merged and a version tag pushed before downloads exist.
+See [publish a downloadable release](docs/RELEASES.md) for the maintainer steps.
+
 ## Build
 
-The current development target is **macOS 26 / Apple Silicon**, with **Xcode
-with Swift 6.3 (validated with Xcode 26.6)** and XcodeGen. This repository has no Swift package dependencies
+The current development target is **macOS 26 on Apple Silicon**, with
+**Swift 6.3**, XcodeGen and Xcode. The toolchain was validated with Xcode 26.6. This repository has no Swift package dependencies
 and contains only the capture app and its two native helpers.
 
 ```sh
@@ -55,6 +67,14 @@ are ad-hoc signed and not notarized. Dependency binaries are not stored in Git.
 Physical iPhone USB utilities are external by default; an explicit experimental
 local-bundle option is documented in the distribution guide.
 
+To prepare the same reviewed cache used by CI from official downloads, run:
+
+```sh
+python3 -B Scripts/prepare-capture-cache.py --cache-root /tmp/capture-release-cache
+```
+
+Set `CAPTURE_DEPENDENCY_CACHE` to that directory when you package the app.
+
 ## Tests
 
 ```sh
@@ -63,7 +83,8 @@ bash Scripts/test-all.sh
 bash Scripts/test-all.sh timeline
 ```
 
-Groups are `core`, `services`, `timeline` and `python`. These use fake tools,
+Groups are `core`, `services`, `timeline` and `python`. The Python group also
+checks release tags, signing configuration, dependency hashes and ZIP assets. These use fake tools,
 isolated fixtures and loopback checks; they do not capture from connected phones
 or install certificates. Optional real-engine tests require
 `CAPTURE_TEST_MITMDUMP`. CI builds the app/helpers and runs all four groups.
