@@ -121,9 +121,14 @@ class ReleaseAssetsTests(unittest.TestCase):
         self.fixture()
         name=release.stage(self.package,self.output,"1.2.3","development")
         self.assertEqual(name,"MobileCapture-macOS-arm64-development.zip")
-        self.assertEqual(sorted(p.name for p in self.output.iterdir()),[name,"SHA256SUMS"])
-        checksum=hashlib.sha256((self.output/name).read_bytes()).hexdigest()
-        self.assertEqual((self.output/"SHA256SUMS").read_text(),f"{checksum}  {name}\n")
+        self.assertEqual(sorted(p.name for p in self.output.iterdir()),sorted([name,"SHA256SUMS","install.sh","AGENT_SETUP.md"]))
+        checksums = dict(line.split("  ", 1)[::-1] for line in (self.output/"SHA256SUMS").read_text().splitlines())
+        self.assertEqual(set(checksums), {name, "install.sh", "AGENT_SETUP.md"})
+        for filename, checksum in checksums.items():
+            self.assertEqual(hashlib.sha256((self.output/filename).read_bytes()).hexdigest(), checksum)
+        for asset, relative in release.SUPPORT_ASSETS.items():
+            self.assertEqual((self.output/asset).read_bytes(), (ROOT/relative).read_bytes())
+        self.assertTrue(os.access(self.output/"install.sh", os.X_OK))
 
     def test_release_asset_has_stable_download_name(self):
         self.fixture("release")

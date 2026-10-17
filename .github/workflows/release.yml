@@ -77,7 +77,22 @@ jobs:
         run: |
           python3 -B Scripts/release-assets.py stage --package "$CAPTURE_ARTIFACT_DIRECTORY" \
             --output "$RUNNER_TEMP/release-assets" --version "$RELEASE_VERSION" --mode "$RELEASE_MODE"
-      - name: Publish the release with its verified ZIP and checksum
+      - name: Write setup and signing notes
+        env:
+          RELEASE_MODE: ${{ steps.release.outputs.mode }}
+        run: |
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Install and diagnose with an agent from the repository URL using [Agent Setup](https://github.com/am5a03/mobile-capture/blob/main/docs/AGENT_SETUP.md).
+
+          Requires Apple Silicon and macOS 26+. The ZIP includes the capture engine, embedded Python and Android tools. Physical iPhone USB logging needs separate supported tools; Simulator capture needs Xcode. Phone certificate trust and VPN approval remain user steps. JSON Doctor reports Mac prerequisites, not phone readiness.
+          NOTES
+          if [[ "$RELEASE_MODE" == development ]]; then
+            cat >> "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+
+          **Development beta: ad-hoc signed and not notarized.** Install only if you trust this project and explicitly accept development builds. macOS can block execution; the installer reports a manual approval handoff and never bypasses Gatekeeper. This beta is for setup testing. Fresh-Mac and full device acceptance remain outstanding.
+          NOTES
+          fi
+      - name: Publish the release with its verified app and setup assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
@@ -85,7 +100,7 @@ jobs:
         run: |
           gh release create "$RELEASE_TAG" "$RUNNER_TEMP"/release-assets/* \
             --repo "$GITHUB_REPOSITORY" --verify-tag --title "$RELEASE_TAG" \
-            --generate-notes --prerelease="$RELEASE_PRERELEASE"
+            --notes-file "$RUNNER_TEMP/release-notes.md" --generate-notes --prerelease="$RELEASE_PRERELEASE"
       - name: Remove signing credentials
         if: always() && steps.release.outputs.mode == 'release'
         run: bash Scripts/configure-release-signing.sh cleanup
