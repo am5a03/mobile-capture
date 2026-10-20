@@ -108,9 +108,9 @@ else:
             (self.assets / asset).write_text("fixture")
         self.checksums()
         metadata = {"tag_name": tag, "draft": False, "prerelease": "-" in tag,
-                    "html_url": f"https://github.com/am5a03/mobile-capture/releases/tag/{tag}",
+                    "html_url": f"https://github.com/raymondctc/mobile-capture/releases/tag/{tag}",
                     "assets": [{"name": name, "size": (self.assets / name).stat().st_size,
-                                "browser_download_url": f"https://github.com/am5a03/mobile-capture/releases/download/{tag}/{name}"}
+                                "browser_download_url": f"https://github.com/raymondctc/mobile-capture/releases/download/{tag}/{name}"}
                                for name in (archive, "SHA256SUMS")]}
         (self.assets / "release.json").write_text(json.dumps(metadata))
 
@@ -223,6 +223,7 @@ else:
     def test_release_metadata_policy_refusal(self):
         for changes in ({"draft": True}, {"prerelease": False}, {"tag_name": "v9.9.9"},
                         {"html_url": "https://github.com/attacker/mobile-capture/releases/tag/" + TAG},
+                        {"html_url": "https://github.com/am5a03/mobile-capture/releases/tag/" + TAG},
                         {"assets": []}):
             with self.subTest(changes=changes):
                 self.package()
@@ -232,6 +233,18 @@ else:
     def test_redirect_asset_url_cannot_change_repository(self):
         metadata = json.loads((self.assets / "release.json").read_text())
         metadata["assets"][0]["browser_download_url"] = "https://example.com/archive.zip"
+        self.metadata(**metadata)
+        self.run_install(69)
+
+    def test_transferred_installer_uses_new_owner_and_rejects_old_owner_assets(self):
+        self.run_install()
+        requests = (self.root / "requests").read_text().splitlines()
+        self.assertEqual(requests[0], "https://api.github.com/repos/raymondctc/mobile-capture/releases/tags/" + TAG)
+        self.assertTrue(all("/raymondctc/mobile-capture/" in url for url in requests))
+        shutil.rmtree(self.prefix)
+        metadata = json.loads((self.assets / "release.json").read_text())
+        metadata["assets"][0]["browser_download_url"] = metadata["assets"][0]["browser_download_url"].replace(
+            "raymondctc/mobile-capture", "am5a03/mobile-capture")
         self.metadata(**metadata)
         self.run_install(69)
 
@@ -324,9 +337,9 @@ else:
         self.checksums()
         metadata = json.loads((self.assets / "release.json").read_text())
         metadata["tag_name"] = self.tag
-        metadata["html_url"] = f"https://github.com/am5a03/mobile-capture/releases/tag/{self.tag}"
+        metadata["html_url"] = f"https://github.com/raymondctc/mobile-capture/releases/tag/{self.tag}"
         for asset in metadata["assets"]:
-            asset["browser_download_url"] = f"https://github.com/am5a03/mobile-capture/releases/download/{self.tag}/" + asset["name"]
+            asset["browser_download_url"] = f"https://github.com/raymondctc/mobile-capture/releases/download/{self.tag}/" + asset["name"]
             asset["size"] = (self.assets / asset["name"]).stat().st_size
         self.metadata(**metadata)
         self.script.write_text(INSTALLER.read_text().replace("/usr/bin/curl", f"'{self.tool}' curl"))

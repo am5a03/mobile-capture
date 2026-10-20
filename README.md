@@ -22,7 +22,7 @@ timeline's reading position and selected event.
 
 ## Download and open
 
-Open [Releases](https://github.com/am5a03/mobile-capture/releases) and download the
+Open [Releases](https://github.com/raymondctc/mobile-capture/releases) and download the
 app ZIP under Assets. Unzip it, move **Mobile Capture.app** into **Applications**,
 and open it to begin Device Setup. Current packages require Apple Silicon and
 macOS 26. A release becomes visible after its verified app ZIP is attached.
@@ -43,7 +43,7 @@ This repository pins Sparkle 2.10.0 and contains the capture app and its two
 native helpers.
 
 ```sh
-git clone https://github.com/am5a03/mobile-capture.git
+git clone https://github.com/raymondctc/mobile-capture.git
 cd mobile-capture
 brew install xcodegen
 xcodegen generate

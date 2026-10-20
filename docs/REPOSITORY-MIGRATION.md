@@ -1,12 +1,31 @@
 # Standalone repository extraction
 
-Mobile Capture's source now lives in [am5a03/mobile-capture](https://github.com/am5a03/mobile-capture).
+Mobile Capture's source now lives in [raymondctc/mobile-capture](https://github.com/raymondctc/mobile-capture).
 The initial snapshot comes from
 [Oh My Android commit 2c17961](https://github.com/am5a03/oh-my-android/commit/2c179619f613e5ac0d829d21f0ec176a5760e666)
 on `codex/issue-4-unified-capture`, including the latest scrollable Capture Details
 layout and native timeline resize fixes. Exact imported-file hashes are recorded
 in [SOURCE-ORIGIN.json](SOURCE-ORIGIN.json). This is a source snapshot with provenance;
 the original commit history remains available in the source repository.
+
+## GitHub ownership transfer
+
+The standalone repository moved from `am5a03/mobile-capture` to
+[raymondctc/mobile-capture](https://github.com/raymondctc/mobile-capture).
+For an existing clone, update the remote and fetch:
+
+```sh
+git remote set-url origin git@github.com:raymondctc/mobile-capture.git
+git fetch origin
+```
+
+New installers, release links, and beta feed configuration use the new owner.
+Published archives, checksums, tags, and signed feed bytes remain unchanged.
+The beta signing key and its Keychain account also stay unchanged.
+See [pre-transfer installation](AGENT_SETUP.md#install-a-release-published-before-the-transfer)
+for existing release installers and [beta feed compatibility](BETA-UPDATES.md#repository-transfer)
+for signed update history. Original Oh My Android links and historical audit
+records retain their original owner.
 
 ## Repository boundary
 

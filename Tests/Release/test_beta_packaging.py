@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import plistlib
 import sys
@@ -38,6 +39,20 @@ class BetaPackagingTests(unittest.TestCase):
         self.assertFalse(info["SUAllowsAutomaticUpdates"])
         self.assertTrue(info["SURequireSignedFeed"])
         self.assertTrue(info["SUVerifyUpdateBeforeExtraction"])
+
+    def test_legacy_repository_policy_is_optional_and_rejects_invalid_aliases(self):
+        config = dict(self.config)
+        config.pop("legacyRepositories", None)
+        path = self.root / "policy.json"
+        path.write_text(json.dumps(config))
+        self.assertEqual(beta.repository(beta.policy(path)), "raymondctc/mobile-capture")
+        for aliases in ("am5a03/mobile-capture", [None], ["../.."], ["am5a03/.."],
+                        ["https://github.com/am5a03/mobile-capture"],
+                        ["am5a03/mobile-capture", "am5a03/mobile-capture"],
+                        ["raymondctc/mobile-capture"]):
+            with self.subTest(aliases=aliases), self.assertRaisesRegex(ValueError, "Legacy repositories"):
+                path.write_text(json.dumps(dict(config, legacyRepositories=aliases)))
+                beta.policy(path)
 
     def test_ordinary_build_removes_beta_metadata(self):
         beta.seal(self.app, self.config, self.tag)
