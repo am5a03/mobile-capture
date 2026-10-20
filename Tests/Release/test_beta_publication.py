@@ -96,6 +96,26 @@ if args[1] == "generate" {
         with self.assertRaises(subprocess.CalledProcessError):
             publication.verify_feed(data.replace(b"Fixture update notes", b"Changed update notes"), self.config)
 
+    def test_transfer_retains_only_explicit_signed_legacy_links(self):
+        canonical = beta.repository(self.config)
+        legacy = "am5a03/mobile-capture"
+        historical = dict(self.candidate, url=self.candidate["url"].replace(canonical, legacy))
+        data = self.signed_feed(historical)
+        items = publication.verify_feed(data, self.config)[1]
+        self.assertEqual(items[0]["url"], historical["url"])
+        with self.assertRaisesRegex(ValueError, "enclosure"):
+            publication.verify_feed(data, dict(self.config, legacyRepositories=[]))
+        foreign = dict(historical, url=historical["url"].replace(legacy, "other-owner/mobile-capture"))
+        with self.assertRaisesRegex(ValueError, "enclosure"):
+            publication.verify_feed(self.signed_feed(foreign), self.config)
+        with self.assertRaises(subprocess.CalledProcessError):
+            publication.verify_feed(data.replace(b"am5a03", b"am5a04"), self.config)
+        newer = dict(self.candidate, tag="v0.1.2-beta.2", build=3001,
+                     url=self.candidate["url"].replace("beta.1", "beta.2"))
+        items = publication.verify_feed(self.signed_feed(newer, data), self.config)[1]
+        self.assertEqual([item["url"] for item in items], [newer["url"], historical["url"]])
+        self.assertFalse(publication.reconcile(items[1:], newer))
+
     def test_unsigned_wrong_key_trailing_data_and_length_are_rejected(self):
         data = self.signed_feed()
         for changed in (data.split(b"<!-- sparkle-signatures:")[0], data + b"<item/>", data.replace(b"length: ", b"length: 0")):

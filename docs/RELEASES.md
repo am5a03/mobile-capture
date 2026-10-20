@@ -6,6 +6,10 @@ the app ZIP, `install.sh`, `AGENT_SETUP.md` and `SHA256SUMS`, then publishes the
 CLI's draft-upload-publish sequence, which supports immutable releases. Builds
 currently require macOS 26.
 
+The repository now belongs to `raymondctc`. Keep already published assets and
+checksums unchanged. For an older release installer, follow
+[pre-transfer installation](AGENT_SETUP.md#install-a-release-published-before-the-transfer).
+
 ## Publish a development prerelease
 
 From the tested commit on `main`, create and push a prerelease tag:
@@ -89,7 +93,7 @@ failure stops the upload. Stable releases never fall back to development signing
 Successful stable releases contain `MobileCapture-macOS-arm64.zip` and
 `SHA256SUMS`. The latest stable app then has this download URL:
 
-<https://github.com/am5a03/mobile-capture/releases/latest/download/MobileCapture-macOS-arm64.zip>
+<https://github.com/raymondctc/mobile-capture/releases/latest/download/MobileCapture-macOS-arm64.zip>
 
 The URL becomes usable after the first successful stable release. The workflow
 publishes only after it has uploaded the verified assets. Creating a release
@@ -107,7 +111,7 @@ For installation by an agent from only the repository URL, follow
 each exact version beside existing copies; it never starts capture or changes
 phone trust.
 
-1. Open the [Releases page](https://github.com/am5a03/mobile-capture/releases).
+1. Open the [Releases page](https://github.com/raymondctc/mobile-capture/releases).
 2. Download the app ZIP listed above for your chosen release.
 3. Unzip it and move **Mobile Capture.app** into **Applications**.
 4. Open the app and follow **Device Setup** for the connected phone.

@@ -13,13 +13,13 @@ existing Xcode installation.
 
 ## 1. Select an authorized version
 
-Open [Mobile Capture releases](https://github.com/am5a03/mobile-capture/releases).
+Open [Mobile Capture releases](https://github.com/raymondctc/mobile-capture/releases).
 Use the installation and channel permission already given in the task. Select
 and record an exact stable tag when stable installation is authorized. If no suitable stable release exists, report
 that result. A prerelease requires explicit consent to a development build. Ask only when
 that consent is missing; do not ask again when the task already grants it.
 
-The pinned example below uses `v0.1.2-beta.1`. This development build is ad-hoc
+The pre-transfer example below uses `v0.1.2-beta.1`. This development build is ad-hoc
 signed and unnotarized. Use the example only with authorization for that exact
 beta. Its publication and availability must be checked on the release page.
 
@@ -30,13 +30,19 @@ are named `MobileCapture-macOS-arm64.zip`. Development ZIPs are named
 
 ## 2. Download and inspect the installer
 
-Run these commands in one shell after the version decision:
+For `v0.1.1-beta.1`, `v0.1.2-beta.1`, or `v0.1.2-beta.2`, follow
+[pre-transfer installation](#install-a-release-published-before-the-transfer)
+instead of the release-installer commands below. Those installers reject
+GitHub's renamed release metadata after the repository transfer.
+
+For releases published with the transfer fix, replace `AUTHORIZED_POST_TRANSFER_TAG`
+with the authorized exact tag. Run these commands in one shell:
 
 ```sh
-release_version='v0.1.2-beta.1'
+release_version='AUTHORIZED_POST_TRANSFER_TAG'
 setup_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/mobile-capture-setup.XXXXXX")
 cd "$setup_directory"
-release_url="https://github.com/am5a03/mobile-capture/releases/download/$release_version"
+release_url="https://github.com/raymondctc/mobile-capture/releases/download/$release_version"
 /usr/bin/curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output install.sh "$release_url/install.sh"
 /usr/bin/curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output SHA256SUMS "$release_url/SHA256SUMS"
 /usr/bin/awk '$2 == "install.sh" { print }' SHA256SUMS > installer.SHA256SUMS
@@ -46,9 +52,9 @@ release_url="https://github.com/am5a03/mobile-capture/releases/download/$release
 
 Stop if a download or checksum check fails. Read the entire script before
 execution. Its repository source is
-[`Scripts/install.sh`](https://github.com/am5a03/mobile-capture/blob/main/Scripts/install.sh).
+[`Scripts/install.sh`](https://github.com/raymondctc/mobile-capture/blob/main/Scripts/install.sh).
 Compare against the source at the selected tag when you review a release.
-The installer must download only from `am5a03/mobile-capture`, verify the ZIP
+The installer must download only from `raymondctc/mobile-capture`, verify the ZIP
 before extraction, and preserve existing app copies and capture data.
 
 Hashes from the same release detect inconsistent downloads. They do not provide
@@ -57,6 +63,29 @@ Decide whether you trust the publisher and script before execution.
 
 Completion criterion: the installer checksum passes and you have reviewed the
 downloaded script. Keep download and execution as separate steps.
+
+### Install a release published before the transfer
+
+Keep the authorized release tag. Review the current installer in the transferred
+repository and record the full source commit containing the transfer fix.
+Download that exact source version separately from execution:
+
+```sh
+release_version='v0.1.2-beta.1'
+installer_source_commit='REVIEWED_FULL_SOURCE_COMMIT'
+setup_directory=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/mobile-capture-setup.XXXXXX")
+cd "$setup_directory"
+/usr/bin/curl --fail --location --proto '=https' --proto-redir '=https' --tlsv1.2 --output install.sh "https://raw.githubusercontent.com/raymondctc/mobile-capture/$installer_source_commit/Scripts/install.sh"
+/bin/cat install.sh
+```
+
+Stop if the download fails. Review the downloaded script and its source commit
+before continuing to step 3. The new script does not match the old release
+installer checksum. It still downloads and checks the original app ZIP against
+the release's unchanged `SHA256SUMS`. Keep the published assets unchanged.
+
+Completion criterion: record the reviewed installer source commit and authorized
+release tag. Use the reviewed script with that exact tag in step 3.
 
 ## 3. Install the selected release
 
@@ -185,7 +214,7 @@ Doctor result, so report the approval handoff instead of inferring readiness.
 
 `macPrerequisitesReady: true` does not establish device readiness. Doctor always
 reports `deviceSetup.status: "notChecked"`. Give the user its `manualActions` and
-the relevant [device setup instructions](https://github.com/am5a03/mobile-capture/blob/main/docs/CAPTURE.md).
+the relevant [device setup instructions](https://github.com/raymondctc/mobile-capture/blob/main/docs/CAPTURE.md).
 The user must handle USB authorization or pairing, certificate installation and
 trust, and any phone VPN or WireGuard settings. These actions require a separate
 setup decision. Starting a capture requires a separate request.

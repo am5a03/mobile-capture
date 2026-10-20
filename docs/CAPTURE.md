@@ -1,6 +1,6 @@
 # Network and device-log capture prototype
 
-Standalone source: [am5a03/mobile-capture](https://github.com/am5a03/mobile-capture).
+Standalone source: [raymondctc/mobile-capture](https://github.com/raymondctc/mobile-capture).
 Originally developed in [Oh My Android issue #4](https://github.com/am5a03/oh-my-android/issues/4).
 
 Open the independent **Mobile Capture.app** for an Android device/emulator, a

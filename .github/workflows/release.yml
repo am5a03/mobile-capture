@@ -85,7 +85,7 @@ jobs:
           RELEASE_MODE: ${{ steps.release.outputs.mode }}
         run: |
           cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
-          Install and diagnose with an agent from the repository URL using [Agent Setup](https://github.com/am5a03/mobile-capture/blob/main/docs/AGENT_SETUP.md).
+          Install and diagnose with an agent from the repository URL using [Agent Setup](https://github.com/raymondctc/mobile-capture/blob/main/docs/AGENT_SETUP.md).
 
           Requires Apple Silicon and macOS 26+. The ZIP includes the capture engine, embedded Python and Android tools. Physical iPhone USB logging needs separate supported tools; Simulator capture needs Xcode. Phone certificate trust and VPN approval remain user steps. JSON Doctor reports Mac prerequisites, not phone readiness.
           NOTES

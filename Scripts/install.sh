@@ -86,8 +86,8 @@ fetch() {
 }
 json() { /usr/bin/plutil -extract "$2" raw -expect "$3" -o - "$1" 2>/dev/null; }
 release=$stage/release.json
-fetch "https://api.github.com/repos/am5a03/mobile-capture/releases/tags/$tag" "$release" 2097152
-[[ "$(json "$release" tag_name string)" == "$tag" && "$(json "$release" draft bool)" == false && "$(json "$release" prerelease bool)" == "$prerelease" && "$(json "$release" html_url string)" == "https://github.com/am5a03/mobile-capture/releases/tag/$tag" ]] || fail 69 'Release metadata does not match the requested public tag.'
+fetch "https://api.github.com/repos/raymondctc/mobile-capture/releases/tags/$tag" "$release" 2097152
+[[ "$(json "$release" tag_name string)" == "$tag" && "$(json "$release" draft bool)" == false && "$(json "$release" prerelease bool)" == "$prerelease" && "$(json "$release" html_url string)" == "https://github.com/raymondctc/mobile-capture/releases/tag/$tag" ]] || fail 69 'Release metadata does not match the requested public tag.'
 archive=MobileCapture-macOS-arm64.zip
 [[ "$prerelease" == false ]] || archive=MobileCapture-macOS-arm64-development.zip
 asset_count=$(json "$release" assets array) || fail 69 'Release assets are missing.'
@@ -99,13 +99,13 @@ for expected in "$archive" SHA256SUMS; do
         [[ "$name" == "$expected" ]] || continue
         found=$((found + 1))
         url=$(json "$release" "assets.$i.browser_download_url" string) || fail 69 'Missing release asset URL.'
-        [[ "$url" == "https://github.com/am5a03/mobile-capture/releases/download/$tag/$expected" ]] || fail 69 'Unexpected release asset URL.'
+        [[ "$url" == "https://github.com/raymondctc/mobile-capture/releases/download/$tag/$expected" ]] || fail 69 'Unexpected release asset URL.'
         size=$(json "$release" "assets.$i.size" integer) || fail 69 'Missing release asset size.'
         maximum=1073741824; [[ "$expected" != SHA256SUMS ]] || maximum=65536
         [[ "$size" =~ ^[1-9][0-9]*$ && "$size" -le "$maximum" ]] || fail 69 'Invalid release asset size.'
     done
     [[ "$found" == 1 ]] || fail 69 "Release must contain exactly one $expected asset."
-    fetch "https://github.com/am5a03/mobile-capture/releases/download/$tag/$expected" "$stage/$expected" "$maximum"
+    fetch "https://github.com/raymondctc/mobile-capture/releases/download/$tag/$expected" "$stage/$expected" "$maximum"
 done
 /usr/bin/awk -v archive="$archive" '
     NF != 2 || $1 !~ /^[0-9a-f]+$/ || length($1) != 64 {exit 1}

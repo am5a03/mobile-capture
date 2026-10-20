@@ -83,8 +83,10 @@ def parse_feed(data, config):
         beta_version(tag)
         if version != tag[1:] or item.findtext(f"{{{SPARKLE}}}channel") != config["channel"] or not re.fullmatch(r"[0-9a-f]{64}", digest) or not SHA.fullmatch(commit):
             raise ValueError("Invalid beta appcast item")
-        url = f"https://github.com/{repository(config)}/releases/download/{tag}/{ASSET}"
-        if enclosure is None or enclosure.get("url") != url or not re.fullmatch(r"[1-9][0-9]*", enclosure.get("length", "")) or len(base64.b64decode(enclosure.get(f"{{{SPARKLE}}}edSignature", ""), validate=True)) != 64:
+        url = enclosure.get("url") if enclosure is not None else None
+        repositories = [repository(config), *config.get("legacyRepositories", [])]
+        allowed_urls = {f"https://github.com/{name}/releases/download/{tag}/{ASSET}" for name in repositories}
+        if enclosure is None or url not in allowed_urls or not re.fullmatch(r"[1-9][0-9]*", enclosure.get("length", "")) or len(base64.b64decode(enclosure.get(f"{{{SPARKLE}}}edSignature", ""), validate=True)) != 64:
             raise ValueError("Appcast enclosure must name a signed exact-tag public archive")
         items.append({"tag": tag, "build": build, "sha256": digest, "commit": commit, "url": url, "signature": enclosure.get(f"{{{SPARKLE}}}edSignature"), "length": int(enclosure.get("length"))})
     if len({item["tag"] for item in items}) != len(items) or len({item["build"] for item in items}) != len(items) or [item["build"] for item in items] != sorted((item["build"] for item in items), reverse=True):

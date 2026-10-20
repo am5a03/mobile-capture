@@ -10,6 +10,25 @@ variable, or place it in GitHub Actions. Actions publishes the final ad-hoc sign
 ZIP. This local procedure signs those exact public bytes and publishes only the
 signed public appcast. A successful Actions run alone does not advertise an update.
 
+## Repository transfer
+
+The current repository is `raymondctc/mobile-capture`. New beta packages seal
+the new-owner feed URL from the policy. Existing packages keep their sealed
+old-owner URL. Both public URLs served the same signed feed when checked on
+19 October 2026. Existing packages depend on GitHub keeping that old URL working.
+
+The policy lists `am5a03/mobile-capture` in `legacyRepositories` so the publisher
+can verify existing signed feed entries without rewriting their archive links.
+Signature verification still runs before those entries are read. New release
+downloads must use the current repository. Retain the legacy entry while the
+signed feed contains those historical links. Publish a new beta to distribute
+the new sealed feed URL. Do not edit a published app bundle or immutable archive.
+
+Keep the existing `am5a03.mobile-capture.beta` Keychain account and public key.
+The account name identifies the signing key, not the GitHub owner. Previously
+prepared publication directories contain the old policy digest. Prepare new
+metadata from the current policy before the next publication.
+
 ## Build the beta archive
 
 1. Complete the app and release fixture checks at the reviewed source commit.
@@ -29,7 +48,7 @@ packages keep updates disabled.
 Read the current feed commit with:
 
 ```sh
-gh api repos/am5a03/mobile-capture/git/ref/heads/codex/beta-update-feed \
+gh api repos/raymondctc/mobile-capture/git/ref/heads/codex/beta-update-feed \
 	--jq '.object.sha'
 ```
 

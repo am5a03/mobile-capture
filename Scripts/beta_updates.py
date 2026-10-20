@@ -33,7 +33,7 @@ SPARKLE_CODE = (
 def policy(path=POLICY_PATH):
     value = json.loads(Path(path).read_text())
     required = {"schemaVersion", "channel", "bundleIdentifier", "feedURL", "publicEDKey", "keychainAccount", "feedBranch", "feedPath", "sparkleVersion", "sparkleToolsURL", "sparkleToolsSHA256"}
-    if set(value) != required or value["schemaVersion"] != 1 or value["channel"] != "beta":
+    if set(value) not in (required, required | {"legacyRepositories"}) or value["schemaVersion"] != 1 or value["channel"] != "beta":
         raise ValueError("Unsupported beta update policy")
     if any(not isinstance(value[key], str) or not value[key] for key in required - {"schemaVersion"}):
         raise ValueError("Beta update policy fields must be nonempty strings")
@@ -49,6 +49,9 @@ def policy(path=POLICY_PATH):
     feed_match = re.fullmatch(r"https://raw\.githubusercontent\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/" + re.escape(branch + "/" + feed), value["feedURL"])
     if not feed_match:
         raise ValueError("Feed URL must match its GitHub branch and path")
+    legacy = value.get("legacyRepositories", [])
+    if not isinstance(legacy, list) or any(not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9-]+/[A-Za-z0-9_.-]+", name) or name.rsplit("/", 1)[-1] in {".", ".."} for name in legacy) or len(set(legacy)) != len(legacy) or feed_match[1] in legacy:
+        raise ValueError("Legacy repositories must be distinct GitHub owner/repository names")
     version = value["sparkleVersion"]
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) or value["sparkleToolsURL"] != f"https://github.com/sparkle-project/Sparkle/releases/download/{version}/Sparkle-{version}.tar.xz":
         raise ValueError("Sparkle tools must use the pinned official release")
