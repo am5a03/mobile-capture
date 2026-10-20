@@ -6,6 +6,29 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <link>https://github.com/am5a03/mobile-capture</link>
     <description>Internal development betas. Ad-hoc signed and not notarized.</description>
     <item>
+      <title>v0.1.2-beta.3</title>
+      <sparkle:version>4002</sparkle:version>
+      <sparkle:shortVersionString>0.1.2-beta.3</sparkle:shortVersionString>
+      <sparkle:channel>beta</sparkle:channel>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <capture:releaseTag>v0.1.2-beta.3</capture:releaseTag>
+      <capture:releaseCommit>83cd9f542622ab5126925150ee780f1fda63dea0</capture:releaseCommit>
+      <capture:sha256>1e0ee8f2143328e6f23a853e0fa332a63e1f96786c3ac645f0ee48528cfee33f</capture:sha256>
+      <description>&lt;h2&gt;New Mobile Capture icon&lt;/h2&gt;
+&lt;ul&gt;
+&lt;li&gt;New teal-and-gold app icon with a transparent surround and all standard macOS sizes.&lt;/li&gt;
+&lt;li&gt;Setup guides, installers, release links and new update packages now use raymondctc/mobile-capture.&lt;/li&gt;
+&lt;li&gt;The update publisher preserves signed history from before the repository transfer and keeps the existing signing key.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;To test, open a released beta 1 or beta 2, choose &lt;b&gt;Mobile Capture → Check for Updates…&lt;/b&gt;, then install and relaunch. Local preview builds have updates disabled.&lt;/p&gt;
+&lt;p&gt;Requires Apple Silicon and macOS 26 or later. The app includes the capture engine, Python and Android tools. Physical-iPhone USB logging uses external tools; Simulator capture requires Xcode. Phone certificate trust and VPN approval remain manual steps.&lt;/p&gt;
+&lt;p&gt;&lt;b&gt;Internal development beta:&lt;/b&gt; ad-hoc signed and not notarized. Initial macOS approval may be required. Update archives and the feed use the existing Sparkle signing key, kept locally in Keychain. Automatic update checks start off.&lt;/p&gt;
+&lt;p&gt;&lt;a href="https://github.com/raymondctc/mobile-capture/blob/main/docs/AGENT_SETUP.md"&gt;Agent setup guide&lt;/a&gt; · &lt;a href="https://github.com/raymondctc/mobile-capture/blob/main/docs/BETA-UPDATES.md"&gt;Beta update guide&lt;/a&gt;&lt;/p&gt;
+</description>
+      <pubDate>Tue, 20 Oct 2026 04:47:20 GMT</pubDate>
+      <enclosure url="https://github.com/raymondctc/mobile-capture/releases/download/v0.1.2-beta.3/MobileCapture-macOS-arm64-development.zip" length="67212470" type="application/octet-stream" sparkle:edSignature="KxJIJu5L01RueCs5dQ7fl6q3LbwCesxAXkJE6xfxeuRM6pwKpdUOulpnvq2cs4uX4UqU4rePg9PV31GYMZXIAQ=="></enclosure>
+    </item>
+    <item>
       <title>v0.1.2-beta.2</title>
       <sparkle:version>3001</sparkle:version>
       <sparkle:shortVersionString>0.1.2-beta.2</sparkle:shortVersionString>
@@ -63,6 +86,6 @@ Implementation: [PR #3](https://github.com/am5a03/mobile-capture/pull/3).
     </item>
   </channel>
 </rss><!-- sparkle-signatures:
-edSignature: cduiaAuMgrMuk+xsUhyPCR1AoHt/8KONYqlOnBqVyrItpEuyLvv4qLUUa7C8ObCAXtOX1FD8HVFTPsmLGPGnCQ==
-length: 5953
+edSignature: 7Tj+1QUPol8+5X4k8UeJxpAO65b6G7sVlx+cUEXFpwCBorWVjOqfTiICqhKjpAanvf0B+bV9Vo5u9Q0AXymzAQ==
+length: 8348
 -->
