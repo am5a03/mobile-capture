@@ -22,6 +22,10 @@ pub(crate) struct Bootstrap {
     pub fixture_drop_initial_reply: bool,
     pub ca: PathBuf,
     pub lock: PathBuf,
+    #[serde(default)]
+    pub resolved_logs: Option<crate::android::ResolvedLogs>,
+    #[serde(default)]
+    pub descriptor_version: u32,
 }
 #[derive(Serialize, Deserialize)]
 pub(super) struct Descriptor {
@@ -37,10 +41,12 @@ pub(super) struct Frame {
 pub(crate) enum Action {
     Attach,
     Snapshot,
+    Status,
     Marker(String),
     Stop,
     Recover,
     Export,
+    ExportControlled(String),
 }
 #[derive(Serialize, Deserialize)]
 pub(crate) enum Reply {
@@ -172,6 +178,11 @@ impl Client {
         }
     }
     pub fn request(&mut self, command: Action) -> Result<Reply> {
+        let timeout = if matches!(command, Action::ExportControlled(_)) {
+            Duration::from_secs(60 * 60)
+        } else {
+            Duration::from_secs(40)
+        };
         let descriptor: Descriptor = lease::read(&self.directory.join("runtime/control.json"))?;
         let mut stream = connect(&descriptor)?;
         send(
@@ -181,7 +192,7 @@ impl Client {
                 command,
             },
         )?;
-        let reply = receive_with_timeout(&mut stream, Duration::from_secs(40))?;
+        let reply = receive_with_timeout(&mut stream, timeout)?;
         self.observe(&reply);
         Ok(reply)
     }
@@ -209,12 +220,38 @@ impl Client {
     pub fn has_lease(&self) -> bool {
         self.lease.is_some()
     }
+    pub fn missing_state(&self) -> Result<bool> {
+        for path in [
+            self.directory.join("session.json"),
+            self.directory.join("runtime/bootstrap.json"),
+        ] {
+            match std::fs::metadata(&path) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
+                Err(error) => {
+                    return Err(format!(
+                        "Cannot inspect capture state at {}. {error}",
+                        path.display()
+                    ))
+                }
+            }
+        }
+        Ok(false)
+    }
     pub fn release(&mut self, lock: &Path) -> Result<()> {
         self.lease.take();
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
             match lease::FileLease::acquire_owner(lock) {
-                Ok(_) => return Ok(()),
+                Ok(mut owner) => {
+                    if self.has_authenticated_completion()
+                        && owner.prior()?.as_deref() == Some(self.directory.as_path())
+                        && self.missing_state()?
+                    {
+                        owner.clear()?;
+                    }
+                    return Ok(());
+                }
                 Err(error) if Instant::now() >= deadline => return Err(error),
                 Err(_) => thread::sleep(Duration::from_millis(20)),
             }
@@ -360,4 +397,73 @@ fn reap_later(mut child: Child) {
     thread::spawn(move || {
         let _ = child.wait();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn release_clears_only_authenticated_missing_state_for_its_current_locator() {
+        for authenticated in [false, true] {
+            for matching_locator in [false, true] {
+                for missing in [
+                    None,
+                    Some("session.json"),
+                    Some("runtime/bootstrap.json"),
+                    Some("directory"),
+                ] {
+                    let root = tempfile::tempdir().unwrap();
+                    let lock = root.path().join("private/owner.lock");
+                    let directory = root.path().join("previous-session");
+                    fs::create_dir_all(directory.join("runtime")).unwrap();
+                    fs::write(directory.join("session.json"), b"{}").unwrap();
+                    fs::write(directory.join("runtime/bootstrap.json"), b"{}").unwrap();
+                    match missing {
+                        Some("directory") => fs::remove_dir_all(&directory).unwrap(),
+                        Some(missing) => fs::remove_file(directory.join(missing)).unwrap(),
+                        None => (),
+                    }
+                    let locator = if matching_locator {
+                        directory.clone()
+                    } else {
+                        root.path().join("another-session")
+                    };
+                    let mut owner = lease::FileLease::acquire_owner(&lock).unwrap();
+                    owner.publish(&locator).unwrap();
+                    drop(owner);
+                    let mut client = Client::detached(directory);
+                    if authenticated {
+                        client.completion = Some(AuthenticatedCompletion);
+                    }
+                    client.release(&lock).unwrap();
+                    let expected = if authenticated && matching_locator && missing.is_some() {
+                        None
+                    } else {
+                        Some(locator)
+                    };
+                    assert_eq!(
+                        prior(&lock).unwrap(), expected,
+                        "authenticated={authenticated}, matching={matching_locator}, missing={missing:?}"
+                    );
+                }
+            }
+        }
+    }
+    #[test]
+    fn authenticated_missing_state_cannot_clear_a_held_owner_locator() {
+        let root = tempfile::tempdir().unwrap();
+        let lock = root.path().join("private/owner.lock");
+        let directory = root.path().join("missing-session");
+        let mut owner = lease::FileLease::acquire_owner(&lock).unwrap();
+        owner.publish(&directory).unwrap();
+        let mut client = Client::detached(directory.clone());
+        client.completion = Some(AuthenticatedCompletion);
+        assert_eq!(
+            client.release(&lock).unwrap_err(),
+            "Another capture owns this connection or source"
+        );
+        assert_eq!(owner.prior().unwrap(), Some(directory));
+    }
 }

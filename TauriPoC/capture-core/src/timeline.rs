@@ -14,12 +14,21 @@ pub fn hash(data: &[u8]) -> String {
 }
 
 pub fn events(logs: &[u8], markers: &[u8], started_at: &str) -> Vec<Event> {
+    events_controlled(logs, markers, started_at, None).expect("uncontrolled normalization")
+}
+pub(crate) fn events_controlled(
+    logs: &[u8],
+    markers: &[u8],
+    started_at: &str,
+    control: Option<&crate::save::SaveHandle>,
+) -> crate::model::Result<Vec<Event>> {
     let mut output = Vec::new();
     for (source, path, bytes) in [
         ("logs", "logs/device.log", logs),
         ("marker", "timeline/markers.jsonl", markers),
     ] {
-        for (index, raw) in records(bytes).into_iter().enumerate() {
+        for (index, raw) in records(bytes, control)?.into_iter().enumerate() {
+            crate::save::check(control)?;
             if raw.iter().all(u8::is_ascii_whitespace) {
                 continue;
             }
@@ -81,7 +90,7 @@ pub fn events(logs: &[u8], markers: &[u8], started_at: &str) -> Vec<Event> {
             let mut identity = format!("{source}\0{path}\0{number}\0").into_bytes();
             identity.extend_from_slice(raw);
             output.push(Event {
-                id: format!("event-{}", &hash(&identity)[..24]),
+                id: format!("event-{}", &crate::save::hash(&identity, control)?[..24]),
                 timestamp,
                 original_timestamp: original,
                 received_at: None,
@@ -94,22 +103,10 @@ pub fn events(logs: &[u8], markers: &[u8], started_at: &str) -> Vec<Event> {
             });
         }
     }
-    output.sort_by(|a, b| {
-        (
-            &a.timestamp,
-            if a.source == "logs" { 0 } else { 2 },
-            line(a),
-            &a.id,
-        )
-            .cmp(&(
-                &b.timestamp,
-                if b.source == "logs" { 0 } else { 2 },
-                line(b),
-                &b.id,
-            ))
-    });
-    output
+    sort_controlled(&mut output, control)?;
+    Ok(output)
 }
+
 fn line(event: &Event) -> usize {
     event
         .raw_ref
@@ -119,11 +116,19 @@ fn line(event: &Event) -> usize {
         .unwrap_or(0)
 }
 
-fn records(bytes: &[u8]) -> Vec<&[u8]> {
+fn records<'a>(
+    bytes: &'a [u8],
+    control: Option<&crate::save::SaveHandle>,
+) -> crate::model::Result<Vec<&'a [u8]>> {
     let mut lines = Vec::new();
     let mut start = 0;
     let mut index = 0;
+    let mut checkpoint = 0;
     while index < bytes.len() {
+        if index >= checkpoint {
+            crate::save::check(control)?;
+            checkpoint = index + crate::save::CHUNK;
+        }
         if bytes[index] == b'\r' || bytes[index] == b'\n' {
             lines.push(&bytes[start..index]);
             if bytes[index] == b'\r' && bytes.get(index + 1) == Some(&b'\n') {
@@ -136,7 +141,7 @@ fn records(bytes: &[u8]) -> Vec<&[u8]> {
     if start < bytes.len() {
         lines.push(&bytes[start..]);
     }
-    lines
+    Ok(lines)
 }
 
 pub(crate) fn network_events(
@@ -144,26 +149,37 @@ pub(crate) fn network_events(
     started_at: &str,
     live: bool,
 ) -> crate::model::Result<Vec<Event>> {
+    network_events_controlled(directory, started_at, live, None)
+}
+pub(crate) fn network_events_controlled(
+    directory: &std::path::Path,
+    started_at: &str,
+    live: bool,
+    control: Option<&crate::save::SaveHandle>,
+) -> crate::model::Result<Vec<Event>> {
     use std::io::{BufRead, Read};
     let file = match crate::files::open(directory, "network/events.jsonl") {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(vec![]),
         Err(e) => return Err(e.to_string()),
     };
-    let mut reader = std::io::BufReader::new(file);
+    let mut reader = std::io::BufReader::with_capacity(
+        crate::save::CHUNK,
+        crate::save::CheckedReader::new(file, control),
+    );
     let mut output = vec![];
     let mut line = 0;
     loop {
         let mut bytes = vec![];
         let n = std::io::Read::by_ref(&mut reader)
-            .take(2 * 1024 * 1024 + 1)
+            .take(128 * 1024 * 1024 + 1)
             .read_until(b'\n', &mut bytes)
             .map_err(|e| e.to_string())?;
         if n == 0 {
             break;
         }
-        if n > 2 * 1024 * 1024 {
-            return Err("Network record exceeds enforced 2 MiB serialization bound".into());
+        if n > 128 * 1024 * 1024 {
+            return Err("Network record exceeds enforced 128 MiB serialization bound".into());
         }
         line += 1;
         if live && !bytes.ends_with(b"\n") {
@@ -175,7 +191,12 @@ pub(crate) fn network_events(
         if bytes.iter().all(u8::is_ascii_whitespace) {
             continue;
         }
-        let value:serde_json::Value=serde_json::from_slice(&bytes).unwrap_or(json!({"kind":"parse_error","summary":"Unparsed network event","detail":{"parse_error":"Invalid network JSON record"}}));
+        let parsed = serde_json::from_reader(std::io::BufReader::with_capacity(
+            crate::save::CHUNK,
+            crate::save::CheckedReader::new(std::io::Cursor::new(&bytes), control),
+        ));
+        crate::save::check(control)?;
+        let value: serde_json::Value = parsed.unwrap_or(json!({"kind":"parse_error","summary":"Unparsed network event","detail":{"parse_error":"Invalid network JSON record"}}));
         let mut detail = value["detail"].as_object().cloned().unwrap_or_default();
         if value["id"].is_string() {
             detail.insert("source_event_id".into(), value["id"].clone());
@@ -215,7 +236,7 @@ pub(crate) fn network_events(
         let mut identity = format!("network\0network/events.jsonl\0{line}\0").into_bytes();
         identity.extend_from_slice(&bytes);
         output.push(Event {
-            id: format!("event-{}", &hash(&identity)[..24]),
+            id: format!("event-{}", &crate::save::hash(&identity, control)?[..24]),
             timestamp,
             original_timestamp: value
                 .get("original_timestamp")
@@ -244,6 +265,57 @@ pub(crate) fn sort(events: &mut [Event]) {
             &b.id,
         ))
     });
+}
+
+pub(crate) fn sort_controlled(
+    events: &mut Vec<Event>,
+    control: Option<&crate::save::SaveHandle>,
+) -> crate::model::Result<()> {
+    if control.is_none() {
+        sort(events);
+        return Ok(());
+    }
+    fn ordered(a: &Event, b: &Event) -> std::cmp::Ordering {
+        (&a.timestamp, source_order(&a.source), line(a), &a.id).cmp(&(
+            &b.timestamp,
+            source_order(&b.source),
+            line(b),
+            &b.id,
+        ))
+    }
+    fn merge_sort(
+        mut events: Vec<Event>,
+        control: Option<&crate::save::SaveHandle>,
+    ) -> crate::model::Result<Vec<Event>> {
+        crate::save::check(control)?;
+        if events.len() <= 256 {
+            events.sort_by(ordered);
+            return Ok(events);
+        }
+        let right = events.split_off(events.len() / 2);
+        let mut left = merge_sort(events, control)?.into_iter().peekable();
+        let mut right = merge_sort(right, control)?.into_iter().peekable();
+        let mut merged = Vec::with_capacity(left.len() + right.len());
+        while let (Some(a), Some(b)) = (left.peek(), right.peek()) {
+            if merged.len() % 128 == 0 {
+                crate::save::check(control)?;
+            }
+            merged.push(if ordered(a, b).is_le() {
+                left.next().unwrap()
+            } else {
+                right.next().unwrap()
+            });
+        }
+        for event in left.chain(right) {
+            if merged.len() % 128 == 0 {
+                crate::save::check(control)?;
+            }
+            merged.push(event);
+        }
+        Ok(merged)
+    }
+    *events = merge_sort(std::mem::take(events), control)?;
+    Ok(())
 }
 
 pub(crate) fn retain_recent(events: &mut Vec<Event>) {
@@ -295,6 +367,7 @@ fn truncate(text: &mut String, max: usize) {
     }
 }
 pub(crate) fn preview(event: &mut Event) {
+    const EVENT_BOUND: usize = 6 * 1024 - 96;
     use base64::{engine::general_purpose::STANDARD, Engine};
     fn shorten(value: &mut serde_json::Value) {
         match value {
@@ -315,25 +388,54 @@ pub(crate) fn preview(event: &mut Event) {
             _ => {}
         }
     }
-    let original = event.detail.clone();
-    shorten(&mut event.detail);
+    let mut bodies = serde_json::Map::new();
     for key in ["request_body", "response_body"] {
-        if let Some(body) = original.get(key) {
-            let mut preview = body.clone();
+        if let Some(body) = event.detail.get(key) {
+            let mut fields = serde_json::Map::new();
+            for name in [
+                "encoding",
+                "unavailable",
+                "reason",
+                "byte_basis",
+                "retained_bytes",
+            ] {
+                if let Some(value) = body.get(name) {
+                    let mut value = value.clone();
+                    shorten(&mut value);
+                    fields.insert(name.into(), value);
+                }
+            }
             if body["unavailable"] != true {
                 if let Some(text) = body["text"].as_str() {
-                    if let Ok(bytes) = STANDARD.decode(text) {
-                        let n = bytes.len().min(1024);
-                        preview["text"] = json!(STANDARD.encode(&bytes[..n]));
-                        preview["preview"] = json!(true);
-                        preview["preview_bytes"] = json!(n);
-                        preview["retained_bytes"] = json!(bytes.len());
+                    // A multiple of four keeps the preview independently decodable.
+                    let prefix = &text.as_bytes()[..text.len().min(1368)];
+                    if let Ok(mut bytes) = STANDARD.decode(prefix) {
+                        bytes.truncate(1024);
+                        fields.insert("text".into(), json!(STANDARD.encode(&bytes)));
+                        fields.insert("preview".into(), json!(true));
+                        fields.insert("preview_bytes".into(), json!(bytes.len()));
+                        let retained = text.len() / 4 * 3
+                            - text
+                                .as_bytes()
+                                .iter()
+                                .rev()
+                                .take_while(|&&b| b == b'=')
+                                .take(2)
+                                .count();
+                        fields.insert("retained_bytes".into(), json!(retained));
                     }
                 }
             }
-            event.detail[key] = preview;
+            bodies.insert(key.into(), serde_json::Value::Object(fields));
         }
     }
+    shorten(&mut event.detail);
+    for (key, body) in bodies {
+        event.detail[key] = body;
+    }
+    truncate(&mut event.id, 128);
+    truncate(&mut event.source, 32);
+    truncate(&mut event.raw_ref, 512);
     truncate(&mut event.summary, 1024);
     truncate(&mut event.timestamp, 64);
     if let Some(original) = &mut event.original_timestamp {
@@ -344,7 +446,7 @@ pub(crate) fn preview(event: &mut Event) {
     }
     truncate(&mut event.kind, 128);
     event.detail["snapshot_preview"] = json!(true);
-    if serde_json::to_vec(event).map_or(true, |v| v.len() > 6144) {
+    if serde_json::to_vec(event).map_or(true, |v| v.len() > EVENT_BOUND) {
         let mut retained = serde_json::Map::new();
         retained.insert("snapshot_preview".into(), json!(true));
         retained.insert("detail_preview_omitted".into(), json!(true));
@@ -354,6 +456,12 @@ pub(crate) fn preview(event: &mut Event) {
             }
         }
         event.detail = serde_json::Value::Object(retained);
+    }
+    if serde_json::to_vec(event).map_or(true, |v| v.len() > EVENT_BOUND) {
+        event.detail = json!({"snapshot_preview":true,"detail_preview_omitted":true});
+        truncate(&mut event.summary, 256);
+        truncate(&mut event.raw_ref, 128);
+        truncate(&mut event.kind, 32);
     }
 }
 
@@ -376,6 +484,40 @@ mod tests {
             detail: json!({}),
             clock_uncertainty_ms: None,
         }
+    }
+
+    #[test]
+    fn controlled_normalization_preserves_ids_and_order_across_merge_batches() {
+        let root = tempfile::tempdir().unwrap();
+        let control = crate::save::SaveHandle::create(root.path()).unwrap();
+        let logs = (0..1200)
+            .rev()
+            .map(|n| format!("1792022401.{}  123  456 I Fixture: line {n}\r\n", n % 10))
+            .collect::<String>();
+        let markers = b"{\"timestamp\":\"2026-10-20T00:00:00Z\",\"text\":\"marker\"}\n";
+        let expected = events(logs.as_bytes(), markers, "2026-10-20T00:00:00Z");
+        let controlled = events_controlled(
+            logs.as_bytes(),
+            markers,
+            "2026-10-20T00:00:00Z",
+            Some(&control),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(expected).unwrap(),
+            serde_json::to_value(controlled).unwrap()
+        );
+        assert_eq!(
+            control.cancel().unwrap(),
+            crate::save::CancelOutcome::Accepted
+        );
+        assert!(events_controlled(
+            logs.as_bytes(),
+            markers,
+            "2026-10-20T00:00:00Z",
+            Some(&control)
+        )
+        .is_err());
     }
 
     #[test]
@@ -540,6 +682,12 @@ print(json.dumps(evidence._read_events(root, {"started_at": sys.argv[3]}, raw_fi
             archive: None,
             warnings: vec![],
             network: NetworkView::Recording(CoverageView::default()),
+            descriptor_version: 1,
+            selection: CaptureSelection::Logs,
+            log_scope: LogScope::default(),
+            network_policy: NetworkPolicy::default(),
+            context: CaptureContext::default(),
+            log_attribution: None,
         }));
         assert!(serde_json::to_vec(&reply).unwrap().len() < 4 * 1024 * 1024);
     }

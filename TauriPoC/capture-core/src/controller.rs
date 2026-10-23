@@ -13,6 +13,13 @@ pub struct CaptureOwner {
     network: Option<Client>,
 }
 impl CaptureOwner {
+    pub fn prior_shutdown_verified(paths: &CapturePaths, fixture: bool) -> Result<bool> {
+        let (lock, _) = network::namespace(paths, fixture)?;
+        let Some(directory) = network::prior(&lock)? else {
+            return Ok(true);
+        };
+        Ok(network::admit_saved(&directory, &lock).is_ok())
+    }
     pub fn open(paths: CapturePaths, tools: ToolSelection, fixture: bool) -> Result<Self> {
         let logs = LogSession::new(
             tools.adb.clone(),
@@ -34,20 +41,100 @@ impl CaptureOwner {
                     Client::attach(directory.clone())
                         .unwrap_or_else(|_| Client::detached(directory)),
                 );
+            } else {
+                network::verify_prior_completion(&directory)?;
             }
         }
         Ok(owner)
     }
-    pub fn discover(&self) -> Result<Vec<Device>> {
-        crate::process::discover(&self.tools.adb)
+    pub fn release_completed_control(&mut self) -> Result<()> {
+        if self.network.is_some() {
+            if !matches!(self.status()?, Snapshot::Stopped(_) | Snapshot::Failed(_)) {
+                return Err(
+                    "Stop and restore the active network capture before releasing control".into(),
+                );
+            }
+            if !self
+                .network
+                .as_ref()
+                .ok_or("Network capture missing")?
+                .has_authenticated_completion()
+            {
+                let directory = self
+                    .network
+                    .as_ref()
+                    .ok_or("Network capture missing")?
+                    .directory
+                    .clone();
+                let (lock, _) = network::namespace(&self.paths, self.fixture)?;
+                network::admit_saved(&directory, &lock)?;
+                if !matches!(self.recover()?, StopOutcome::Ready(_)) {
+                    return Err("Stopped capture source proof could not be reacquired".into());
+                }
+            }
+            let client = self.network.as_mut().ok_or("Network capture missing")?;
+            if !client.has_authenticated_completion() {
+                return Err("Stopped capture has no authenticated completion".into());
+            }
+            let directory = client.directory.clone();
+            let (lock, _) = network::namespace(&self.paths, self.fixture)?;
+            client.release(&lock)?;
+            self.network = Some(Client::detached(directory));
+        } else if !matches!(
+            self.logs.status()?,
+            Snapshot::Idle { .. } | Snapshot::Stopped(_) | Snapshot::Failed(_)
+        ) {
+            return Err("Stop and verify the active log capture before releasing control".into());
+        }
+        Ok(())
+    }
+    pub fn open_saved(&mut self, directory: std::path::PathBuf) -> Result<Snapshot> {
+        let directory = fs::canonicalize(directory).map_err(|e| e.to_string())?;
+        if self.directory() == Some(directory.as_path()) {
+            return self.status();
+        }
+        self.release_completed_control()?;
+        if directory.join("runtime/bootstrap.json").exists() {
+            let (lock, _) = network::namespace(&self.paths, self.fixture)?;
+            network::admit_saved(&directory, &lock)?;
+            let snapshot = network::offline_snapshot(&directory)?;
+            if !matches!(snapshot, Snapshot::Stopped(_) | Snapshot::Failed(_)) {
+                return Err("Saved network source completion is not available".into());
+            }
+            self.network = Some(Client::detached(directory));
+            Ok(snapshot)
+        } else {
+            let snapshot = self.logs.open_saved(directory)?;
+            self.network = None;
+            Ok(snapshot)
+        }
+    }
+    pub fn status(&mut self) -> Result<Snapshot> {
+        if let Some(client) = &mut self.network {
+            if client.missing_state()? {
+                return Err(missing_state_error(client));
+            }
+            match client.request(Action::Status) {
+                Ok(Reply::Snapshot(s)) => Ok(s),
+                Ok(Reply::Error(e)) => Err(e),
+                _ => network::offline_snapshot(&client.directory),
+            }
+        } else {
+            self.logs.status()
+        }
     }
     pub fn start(&mut self, request: StartRequest) -> Result<Snapshot> {
         request.limits.validate()?;
-        if !request.whole_device_consent {
+        request.network_policy.validate()?;
+        request.context.validate()?;
+        if request.selection.includes_logs()
+            && matches!(request.log_scope, LogScope::WholeDevice)
+            && !request.whole_device_consent
+        {
             return Err("Explicit consent to whole-device Android logs is required".into());
         }
         if let Some(client) = &self.network {
-            if missing_network_state(client)? {
+            if client.missing_state()? {
                 if !client.has_authenticated_completion() {
                     return Err(missing_state_error(client));
                 }
@@ -62,24 +149,30 @@ impl CaptureOwner {
                 client.release(&lock)?;
             }
         }
+        let resolved = if request.selection.includes_logs() {
+            Some(crate::android::resolve(
+                &self.tools.adb,
+                &request.serial,
+                &request.log_scope,
+            )?)
+        } else {
+            None
+        };
         match &request.selection {
             CaptureSelection::Logs => {
-                let snapshot = self.logs.start(
-                    request.serial,
-                    request.whole_device_consent,
-                    request.limits,
-                )?;
+                let snapshot = self
+                    .logs
+                    .start(request, resolved.ok_or("Missing log scope resolution")?)?;
                 self.network = None;
                 Ok(snapshot)
             }
-            CaptureSelection::LogsAndNetwork(consent) => {
+            CaptureSelection::LogsAndNetwork(consent) | CaptureSelection::Network(consent) => {
                 if !consent.whole_device {
                     return Err(
                         "Explicit consent to whole-device HTTP(S) capture is required".into(),
                     );
                 }
-                if !self
-                    .discover()?
+                if !crate::android::devices(&self.tools.adb)?
                     .iter()
                     .any(|d| d.serial == request.serial && d.state == DeviceState::Ready)
                 {
@@ -111,6 +204,8 @@ impl CaptureOwner {
                     ca,
                     recovery: false,
                     fixture_drop_initial_reply: false,
+                    resolved_logs: resolved,
+                    descriptor_version: 1,
                 };
                 let directory = config.directory.clone();
                 match Client::launch(config) {
@@ -128,7 +223,7 @@ impl CaptureOwner {
     }
     pub fn snapshot(&mut self) -> Result<Snapshot> {
         if let Some(client) = &mut self.network {
-            if missing_network_state(client)? {
+            if client.missing_state()? {
                 return Err(missing_state_error(client));
             }
             match client.request(Action::Snapshot) {
@@ -179,16 +274,68 @@ impl CaptureOwner {
         self.network = Some(Client::launch(config)?);
         self.stop()
     }
-    pub fn export(&mut self) -> Result<std::path::PathBuf> {
+    pub fn prepare_save(&mut self) -> Result<crate::save::SaveHandle> {
         if self.network.is_none() {
-            return self.logs.export();
+            return self.logs.prepare_save();
+        }
+        if !matches!(self.status()?, Snapshot::Stopped(_) | Snapshot::Failed(_)) {
+            return Err("Save requires restored routing and verified source shutdown".into());
+        }
+        if !self
+            .network
+            .as_ref()
+            .is_some_and(Client::has_authenticated_completion)
+        {
+            let directory = self
+                .network
+                .as_ref()
+                .ok_or("Network capture missing")?
+                .directory
+                .clone();
+            let (lock, _) = network::namespace(&self.paths, self.fixture)?;
+            network::admit_saved(&directory, &lock)?;
+            if !matches!(self.recover()?, StopOutcome::Ready(_)) {
+                return Err("Stopped source writers are not quiescent".into());
+            }
+        }
+        let client = self.network.as_ref().ok_or("Network capture missing")?;
+        if !client.has_authenticated_completion() {
+            return Err("Save requires authenticated completion".into());
+        }
+        crate::save::SaveHandle::create(&client.directory)
+    }
+    pub fn export_with_control(
+        &mut self,
+        control: &crate::save::SaveHandle,
+    ) -> Result<std::path::PathBuf> {
+        self.export_impl(Some(control))
+    }
+    pub fn export(&mut self) -> Result<std::path::PathBuf> {
+        self.export_impl(None)
+    }
+    fn export_impl(
+        &mut self,
+        control: Option<&crate::save::SaveHandle>,
+    ) -> Result<std::path::PathBuf> {
+        if self.network.is_none() {
+            return match control {
+                Some(control) => self.logs.export_with_control(control),
+                None => self.logs.export(),
+            };
         }
         let client = self.network.as_mut().ok_or("Network capture missing")?;
-        if missing_network_state(client)? {
+        if let Some(control) = control {
+            control.matches(&client.directory)?;
+        }
+        if client.missing_state()? {
             return Err(missing_state_error(client));
         }
+        let command = || match control {
+            Some(control) => Action::ExportControlled(control.id().into()),
+            None => Action::Export,
+        };
         let directory = client.directory.clone();
-        let mut reply = client.request(Action::Export);
+        let mut reply = client.request(command());
         if reply.is_err() && network::sealed_on_disk(&directory) {
             if !matches!(self.recover()?, StopOutcome::Ready(_)) {
                 return Err("Stopped source writers are not quiescent".into());
@@ -197,7 +344,7 @@ impl CaptureOwner {
                 .network
                 .as_mut()
                 .ok_or("Recovered capture missing")?
-                .request(Action::Export);
+                .request(command());
         }
         match reply? {
             Reply::Archive(path) => Ok(path),
@@ -211,24 +358,6 @@ impl CaptureOwner {
             .map(|c| c.directory.as_path())
             .or_else(|| self.logs.directory())
     }
-}
-fn missing_network_state(client: &Client) -> Result<bool> {
-    for path in [
-        client.directory.join("session.json"),
-        client.directory.join("runtime/bootstrap.json"),
-    ] {
-        match fs::metadata(&path) {
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(true),
-            Err(error) => {
-                return Err(format!(
-                    "Cannot inspect capture state at {}. {error}",
-                    path.display()
-                ))
-            }
-        }
-    }
-    Ok(false)
 }
 fn missing_state_error(client: &Client) -> String {
     if client.has_authenticated_completion() {
@@ -249,5 +378,106 @@ fn outcome(snapshot: Snapshot) -> Result<StopOutcome> {
         Snapshot::RecoveryRequired(view) => Ok(StopOutcome::RecoveryRequired(view)),
         Snapshot::UnverifiedShutdown(view) => Ok(StopOutcome::Unverified(view)),
         _ => Err("No stopped capture".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn tools() -> ToolSelection {
+        ToolSelection {
+            adb: std::env::current_exe().unwrap(),
+            worker: "unused-worker".into(),
+            guardian: "unused-guardian".into(),
+            mitmdump: None,
+            addon: "unused-addon".into(),
+        }
+    }
+    #[test]
+    fn fresh_owner_refuses_missing_or_unverified_prior_metadata() {
+        let states = [
+            None,
+            Some(b"invalid".to_vec()),
+            Some(
+                serde_json::to_vec(&json!({"phase":"recording","routing_restored":true})).unwrap(),
+            ),
+            Some(serde_json::to_vec(&json!({"phase":"saved","routing_restored":false})).unwrap()),
+            Some(serde_json::to_vec(&json!({"phase":"saved"})).unwrap()),
+            Some(serde_json::to_vec(&json!({"phase":"unknown","routing_restored":true})).unwrap()),
+        ];
+        for (index, state) in states.into_iter().enumerate() {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = root.path().join("runtime");
+            let prior = root.path().join("previous-session");
+            fs::create_dir(&runtime).unwrap();
+            if let Some(state) = state {
+                fs::create_dir(&prior).unwrap();
+                fs::write(prior.join("session.json"), state).unwrap();
+            }
+            let lock = runtime.join("owner.lock");
+            fs::write(&lock, prior.to_str().unwrap()).unwrap();
+            let locator = fs::read(&lock).unwrap();
+            let paths = CapturePaths {
+                output_root: root.path().join("output"),
+                runtime_root: Some(runtime),
+            };
+            let result = CaptureOwner::open(paths.clone(), tools(), true);
+            let Err(error) = result else {
+                panic!("Fresh owner accepted unverified prior state {index}");
+            };
+            assert!(error.contains(&prior.display().to_string()), "{error}");
+            assert!(error.contains("Restore"), "{error}");
+            assert!(error.contains("owning app"), "{error}");
+            assert_eq!(fs::read(lock).unwrap(), locator);
+            assert!(!paths.output_root.exists());
+        }
+    }
+    #[test]
+    fn fresh_owner_accepts_completed_swift_metadata_and_attaches_own_bootstrap() {
+        for phase in ["saved", "partial", "failed"] {
+            let root = tempfile::tempdir().unwrap();
+            let runtime = root.path().join("runtime");
+            let prior = root.path().join("swift-session");
+            fs::create_dir(&runtime).unwrap();
+            fs::create_dir(&prior).unwrap();
+            fs::write(runtime.join("owner.lock"), prior.to_str().unwrap()).unwrap();
+            fs::write(
+                prior.join("session.json"),
+                serde_json::to_vec(&json!({
+                    "phase": phase, "routing_restored": true
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let paths = CapturePaths {
+                output_root: root.path().join("output"),
+                runtime_root: Some(runtime),
+            };
+            let mut owner = CaptureOwner::open(paths.clone(), tools(), true).unwrap();
+            assert!(matches!(owner.status().unwrap(), Snapshot::Idle { .. }));
+            fs::create_dir(prior.join("runtime")).unwrap();
+            fs::write(prior.join("runtime/bootstrap.json"), b"{}").unwrap();
+            let owner = CaptureOwner::open(paths, tools(), true).unwrap();
+            assert_eq!(owner.directory(), Some(prior.as_path()));
+            assert!(!owner.network.unwrap().has_authenticated_completion());
+        }
+    }
+    #[test]
+    fn absent_namespace_is_idle_but_unreadable_prior_state_is_not_verified() {
+        let root = tempfile::tempdir().unwrap();
+        let paths = CapturePaths {
+            output_root: root.path().join("sessions"),
+            runtime_root: Some(root.path().join("runtime")),
+        };
+        assert!(CaptureOwner::prior_shutdown_verified(&paths, true).unwrap());
+        std::fs::create_dir_all(paths.runtime_root.as_ref().unwrap()).unwrap();
+        std::fs::write(
+            paths.runtime_root.as_ref().unwrap().join("owner.lock"),
+            root.path().join("missing-session").to_str().unwrap(),
+        )
+        .unwrap();
+        assert!(!CaptureOwner::prior_shutdown_verified(&paths, true).unwrap());
     }
 }

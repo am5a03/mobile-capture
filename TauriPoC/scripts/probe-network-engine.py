@@ -1,4 +1,3 @@
-"""Real 12.2.3 loopback proof, with private SSLContext trust and native replay."""
 import base64
 import gzip
 import http.client
@@ -25,6 +24,9 @@ setup_nonce = "9c" * 16
 request_body = b"\x00\xff\x80original request\x00"
 encoded_response = gzip.compress(b"\x00\xff\x80encoded original response" * 8, mtime=0)
 large = b"\xff" * (256 * 1024 + 1)
+production_body = (b"full body search tail " * 100000) + b"end-of-production-body"
+legacy_policy = {"max_flows": 32, "max_body_bytes": 262144, "max_header_bytes": 16384,
+                 "max_total_bytes": 100663296, "duration_ms": 120000}
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -33,13 +35,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/binary-request-header":
             assert self.headers.get("X-Fixture") == "\xff"
-        self.respond(large if self.path == "/large" else b"bounded", False)
+        self.respond(production_body if self.path == "/production-body" else large if self.path == "/large" else b"bounded", False)
     def respond(self, body, compressed):
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(body)))
         if self.path == "/binary-header":
             self.send_header("X-Fixture", "\xff")
+        if self.path == "/large-header":
+            self.send_header("X-Large-Fixture", "x" * 40000)
         if compressed:
             self.send_header("Content-Encoding", "gzip")
         self.end_headers()
@@ -49,7 +53,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 
-def start(name, blocked=False, addon=None, unready=False):
+def start(name, blocked=False, addon=None, unready=False, policy=None):
     session = root / name
     runtime = session / "runtime"
     runtime.mkdir(parents=True, mode=0o700)
@@ -71,7 +75,8 @@ def start(name, blocked=False, addon=None, unready=False):
             import fcntl
             fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
     config = runtime / "config.json"
-    config.write_text(json.dumps({"directory": str(session), "nonce": nonce, "setup_nonce": setup_nonce, "forwarding": False}))
+    config.write_text(json.dumps({"directory": str(session), "nonce": nonce, "setup_nonce": setup_nonce,
+                                  "forwarding": False, "policy": legacy_policy if policy is None else policy}))
     errors = open(session / "stderr.private", "wb")
     proc = subprocess.Popen([engine, "--quiet", "--listen-host", "127.0.0.1", "--listen-port", str(port), "--set", "confdir=" + str(ca), "--set", "connection_strategy=lazy", "--set", "upstream_cert=false", "-s", str(addon or Path(__file__).resolve().parents[1] / "resources/network_addon.py")], env=dict(os.environ, CAPTURE_ENGINE_CONFIG=str(config)), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=errors)
     if blocked or unready:
@@ -350,7 +355,7 @@ def owned_session(mode):
                 context = ssl.create_default_context(cafile=coverage["public_certificate"])
                 connection = http.client.HTTPSConnection("127.0.0.1", port, context=context, timeout=10)
                 connection.set_tunnel("mitm.it", 443)
-                path = coverage["synthetic_check_url"].split("mitm.it", 1)[1] + "/https"
+                path = coverage["synthetic_check_url"].split("mitm.it", 1)[1]
                 connection.request("GET", path)
                 assert connection.getresponse().status == 200
                 connection.close()
@@ -387,11 +392,26 @@ def owned_session(mode):
         assert owner.returncode == 0, (base / "owner.stderr.private").read_text()
         result = json.loads(output)
         assert result["outcome"]["outcome"] == "ready", result
-        completion = result["outcome"]["session"]["network"]["detail"]
-        assert completion["routing_restored"] and completion["partial"] == (mode != "success"), completion
+        stopped = result["outcome"]["session"]
+        logs = stopped["receipt"]
+        assert logs["reason"] == "lease_closed" and logs["child_reaped"], logs
+        assert logs["forced"] == (os.name == "nt") and not logs["stderr"], logs
+        assert logs["bytes"] > 0 and logs["records"] > 0, logs
+        completion = stopped["network"]["detail"]
+        session_partial = mode != "success" or logs["forced"]
+        assert completion["routing_restored"] and completion["partial"] == session_partial, completion
         assert not completion["forced"] and not completion["interrupted"]
+        expected_reasons = []
+        if mode == "flush-error":
+            expected_reasons.append("Network engine has no verified graceful completion")
+        if logs["forced"]:
+            expected_reasons.append("Log source ended LeaseClosed. ")
+        if mode in ("tls-error", "http-error"):
+            expected_reasons.append("Network evidence contains HTTP, TLS, or parse errors")
+        assert completion["reasons"] == expected_reasons, completion
         state = json.loads(state_path.read_text())
         assert state["settings"] == {} and state["reverse"] == {}
+        receipt = None
         if mode == "flush-error":
             assert not (directory / "runtime/engine-receipt.json").exists()
             assert (directory / "runtime/closed-before-lease-release").read_text() == "verified"
@@ -399,13 +419,25 @@ def owned_session(mode):
         else:
             receipt = json.loads((directory / "runtime/engine-receipt.json").read_text())
             assert receipt["done"] and receipt["partial"] == (mode != "success")
+            assert receipt["nonce"] == json.loads((directory / "runtime/engine-config.json").read_text())["nonce"]
         with zipfile.ZipFile(result["archive"]) as archive:
             manifest = json.loads(archive.read("manifest.json"))
+            assert manifest["capture_logs"] and manifest["capture_network"]
+            assert manifest["collector_status"] == logs
+            assert manifest["routing_restored"] and manifest["network_completion"]["partial"] == session_partial
+            assert manifest["network_completion"]["reasons"] == expected_reasons
+            assert manifest["package_state"] == ("partial" if session_partial else "complete")
+            assert manifest["completeness"]["partial"] == session_partial
             metadata = json.dumps({"context": manifest["context"], "network": manifest["network_completion"]})
             assert "public_certificate" not in metadata and "synthetic_check_url" not in metadata
             assert str(namespace) not in metadata
             events = [json.loads(line) for line in archive.read("network/events.jsonl").splitlines()]
             if mode == "success":
+                facts = json.loads(archive.read("network/incomplete.json"))
+                assert facts["errors"] == [] and facts["flow_ids"] == [] and facts["count"] == 0
+                assert facts["omitted_flows"] == 0 and facts["missing_bodies"] == [] and facts["unavailable_bodies"] == 0
+                assert not manifest["completeness"]["network_error_refs"] and not manifest["completeness"]["missing_artifacts"]
+                assert not any(event["kind"] in ("error", "tls_error", "parse_error") for event in events), events
                 entries = json.loads(archive.read("network/capture.har"))["log"]["entries"]
                 assert len(entries) == 2
                 assert base64.b64decode(entries[0]["request"]["postData"]["text"]) == request_body
@@ -432,19 +464,128 @@ def owned_session(mode):
                     if mode == "tls-error":
                         assert manifest["sources"]["network"] == "tls_failed"
             if os.name != "nt":
-                logs = manifest["collector_status"]
-                assert logs["reason"] == "lease_closed" and not logs["forced"] and not logs["stderr"]
+                assert not logs["incomplete_tail"], logs
                 assert not manifest["completeness"]["unparsed_event_refs"]
-                assert manifest["package_state"] == ("complete" if mode == "success" else "partial")
-        return {"mode": mode, "archive": result["archive"], "routing_restored": True, "network_partial": completion["partial"]}
+        return {"mode": mode, "archive": result["archive"], "routing_restored": True,
+                "engine_receipt_verified": receipt is not None, "engine_partial": None if receipt is None else receipt["partial"],
+                "log_forced": logs["forced"], "log_incomplete_tail": logs["incomplete_tail"],
+                "session_partial": completion["partial"], "session_reasons": completion["reasons"]}
     finally:
         if owner.poll() is None:
             owner.kill()
             owner.wait()
         errors.close()
 
+def production_policy_proof():
+    policy = {"max_flows": 100, "max_body_bytes": 4 * 1024 * 1024,
+              "max_header_bytes": 65536, "max_total_bytes": 128 * 1024 * 1024,
+              "duration_ms": 180000}
+    saved, ca, port, proc, errors = start("production-policy", policy=policy)
+    try:
+        for path in ["/bounded"] * 40 + ["/production-body", "/large-header"]:
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+            connection.request("GET", f"http://127.0.0.1:{server.server_port}{path}")
+            response = connection.getresponse()
+            expected = production_body if path == "/production-body" else b"bounded"
+            assert response.read() == expected
+            if path == "/large-header":
+                assert len(response.getheader("X-Large-Fixture")) == 40000
+            connection.close()
+        (saved / "runtime/engine-stop.json").write_text(json.dumps({"nonce": nonce}))
+        assert proc.wait(timeout=15) == 0
+        entries = json.loads((saved / "network/capture.har").read_text())["log"]["entries"]
+        assert len(entries) == 42, f"production policy retained {len(entries)} of 42 forwarded flows"
+        retained = next(entry for entry in entries if entry["request"]["url"].endswith("/production-body"))
+        assert base64.b64decode(retained["response"]["content"]["text"]) == production_body
+        facts = json.loads((saved / "network/incomplete.json").read_text())
+        assert facts["omitted_flows"] == 0 and facts["missing_bodies"] == []
+        assert facts["policy"]["body_bytes"] == policy["max_body_bytes"]
+        assert not json.loads((saved / "runtime/engine-receipt.json").read_text())["partial"]
+        replay_result = saved / "native-replay.json"
+        subprocess.run([engine, "--quiet", "--no-server", "--set", "confdir=" + str(ca), "-s", str(replay)],
+                       env=dict(os.environ, CAPTURE_REPLAY_FILE=str(saved / "network/capture.mitm"),
+                                CAPTURE_REPLAY_RESULT=str(replay_result)), check=True, timeout=15)
+        flows = json.loads(replay_result.read_text())
+        flow = next(flow for flow in flows if flow["id"] == retained["_flow_id"])
+        assert base64.b64decode(flow["response"]) == production_body
+        events = [json.loads(line) for line in (saved / "network/events.jsonl").read_text().splitlines()]
+        event = next(event for event in events if event["kind"] == "response" and event["detail"]["flow_id"] == flow["id"])
+        assert base64.b64decode(event["detail"]["response_body"]["text"]) == production_body
+        return {"forwarded_and_retained_flows": 42, "body_bytes": len(production_body), "response_header_bytes": 40000,
+                "native_har_jsonl_bytes_match": True}
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        errors.close()
+
+production_proof = production_policy_proof()
+body_fault_addon = root / "body-fault-addon.py"
+body_fault_addon.write_text("""import importlib.util
+spec=importlib.util.spec_from_file_location('body_storage_base', BASE)
+module=importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+class Broken:
+    def __init__(self,file): self.file=file
+    def write(self,data): raise OSError('fixture body storage full')
+    def __getattr__(self,name): return getattr(self.file,name)
+class Fault(module.Capture):
+    def requestheaders(self,flow):
+        super().requestheaders(flow)
+        slot=self.pending.get(flow.id)
+        if slot: slot['request'].data=Broken(slot['request'].data)
+addons=[Fault()]
+""".replace("BASE", repr(str(Path(__file__).resolve().parents[1] / "resources/network_addon.py"))))
+body_fault, _, body_port, body_proc, body_errors = start("body-storage-failure", addon=body_fault_addon)
+try:
+    connection = http.client.HTTPConnection("127.0.0.1", body_port, timeout=10)
+    connection.request("POST", f"http://127.0.0.1:{server.server_port}/encoded", request_body)
+    assert connection.getresponse().read() == encoded_response
+    connection.close()
+    (body_fault / "runtime/engine-stop.json").write_text(json.dumps({"nonce": nonce}))
+    assert body_proc.wait(timeout=10) == 0
+    facts = json.loads((body_fault / "network/incomplete.json").read_text())
+    assert facts["unavailable_bodies"] == 1
+    assert facts["errors"] == ["Body storage failed: fixture body storage full"]
+    entry = json.loads((body_fault / "network/capture.har").read_text())["log"]["entries"][0]
+    assert entry["request"]["_bodyUnavailable"] and entry["request"]["bodySize"] == -1
+    assert json.loads((body_fault / "runtime/engine-receipt.json").read_text())["partial"]
+finally:
+    if body_proc.poll() is None:
+        body_proc.kill()
+        body_proc.wait()
+    body_errors.close()
+
+def duration_policy_proof():
+    delay = 121 if os.environ.get("CAPTURE_TEST_LONG_POLICY") == "1" else 0.4
+    policy = dict(legacy_policy, duration_ms=150000 if delay > 1 else 200)
+    saved, _, port, proc, errors = start("policy-duration", policy=policy)
+    try:
+        time.sleep(delay)
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+        connection.request("GET", f"http://127.0.0.1:{server.server_port}/bounded")
+        assert connection.getresponse().read() == b"bounded"
+        connection.close()
+        (saved / "runtime/engine-stop.json").write_text(json.dumps({"nonce": nonce}))
+        assert proc.wait(timeout=10) == 0
+        entries = json.loads((saved / "network/capture.har").read_text())["log"]["entries"]
+        assert len(entries) == (1 if delay > 1 else 0)
+        facts = json.loads((saved / "network/incomplete.json").read_text())
+        assert facts["omitted_flows"] == (0 if delay > 1 else 1)
+        return {"elapsed_seconds": delay, "retained_after_120_seconds": delay > 120,
+                "configured_expiry_checked": delay < 1}
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        errors.close()
+
+duration_proof = duration_policy_proof()
 owned_proofs = [owned_session(mode) for mode in ["success", "tls-error", "http-error", "flush-error", "binary-header"]]
 server.shutdown()
 result = {"root": str(root), "real_engine": "12.2.3", "native_har_jsonl_ids_and_raw_bytes_match": True, "http_binary_gzip_forwarded": True, "https_private_client_trust": True, "admitted_flows": 32, "omitted_flows": 4, "oversize_body_unavailable_everywhere": True, "private_nonce_shutdown": True, "owner_eof_graceful_done": True, "source_lease_failure_stops_unready_listener": True, "cross_file_write_failure_truthfully_partial": True, "flush_failure_closes_writers_before_source_lease_release": True, "partial_writer_initialization_closes_before_lease_release": True, "binary_headers_forward_but_decline_retention_truthfully": True, "device_routing": "compiled_private_fake_only", "rust_owner_guardian_real_engine": owned_proofs}
+result["production_policy"] = production_proof
+result["duration_policy"] = duration_proof
+result["body_storage_failure_keeps_forwarding"] = True
 (root / "result.json").write_text(json.dumps(result, indent=2))
 print(json.dumps(result))

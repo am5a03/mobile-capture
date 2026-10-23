@@ -9,7 +9,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub(crate) struct LogCollector {
@@ -46,11 +46,28 @@ impl LogCollector {
             let _ = child.wait();
             return Err(error.to_string());
         }
-        Ok(Self {
+        let mut collector = Self {
             child,
             input: Some(input),
             _job: job,
-        })
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while config.source_lease
+            && !crate::lease::read::<bool>(&config.directory.join("runtime/log-ready.json"))
+                .unwrap_or(false)
+        {
+            if collector
+                .child
+                .try_wait()
+                .map_err(|e| e.to_string())?
+                .is_some()
+                || Instant::now() >= deadline
+            {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Ok(collector)
     }
     pub(crate) fn close(&mut self) -> Result<()> {
         self.input.take();
@@ -87,6 +104,8 @@ struct Session {
     lifecycle: Lifecycle,
     archive: Option<PathBuf>,
     markers: std::fs::File,
+    descriptor: SessionDescriptor,
+    quiescent: Option<crate::lease::FileLease>,
 }
 pub(crate) struct LogSession {
     adb: PathBuf,
@@ -105,18 +124,13 @@ impl LogSession {
             session: None,
         }
     }
-    pub fn discover(&self) -> Result<Vec<Device>> {
-        process::discover(&self.adb)
-    }
     pub fn start(
         &mut self,
-        serial: String,
-        whole_device_consent: bool,
-        limits: Limits,
+        request: StartRequest,
+        resolved: crate::android::ResolvedLogs,
     ) -> Result<Snapshot> {
-        if !whole_device_consent {
-            return Err("Explicit consent to whole-device Android logs is required. App scope is unavailable.".into());
-        }
+        let serial = request.serial.clone();
+        let limits = request.limits.clone();
         limits.validate()?;
         self.refresh()?;
         if self.session.as_ref().is_some_and(|s| {
@@ -129,8 +143,7 @@ impl LogSession {
                 "Stop and verify the existing collector before starting another capture".into(),
             );
         }
-        let device = self
-            .discover()?
+        let device = crate::android::devices(&self.adb)?
             .into_iter()
             .find(|d| d.serial == serial && d.state == DeviceState::Ready)
             .ok_or("Select an authorized, ready Android device")?;
@@ -141,6 +154,7 @@ impl LogSession {
             .map_err(|e| e.to_string())?
             .keep();
         fs::create_dir(directory.join("timeline")).map_err(|e| e.to_string())?;
+        crate::lease::private_directory(&directory.join("runtime"))?;
         let markers = OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -153,6 +167,20 @@ impl LogSession {
             .into_owned();
         let started_at = now();
         fs::write(directory.join("session.json"), serde_json::to_vec(&serde_json::json!({"id": id, "started_at": started_at, "coordinator": "tauri-poc"})).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let descriptor = SessionDescriptor {
+            version: 1,
+            id: id.clone(),
+            device: device.clone(),
+            started_at: started_at.clone(),
+            selection: request.selection.clone(),
+            log_scope: request.log_scope.clone(),
+            limits: limits.clone(),
+            network_policy: request.network_policy.clone(),
+            fixture: self.fixture,
+            context: request.context.clone(),
+            log_attribution: Some(resolved.attribution.clone()),
+        };
+        crate::lease::write(&directory.join("capture.json"), &descriptor)?;
         let lease = LogCollector::launch(
             &self.worker,
             &WorkerConfig {
@@ -160,7 +188,9 @@ impl LogSession {
                 serial,
                 directory: directory.clone(),
                 limits: limits.clone(),
-                source_lease: false,
+                source_lease: true,
+                log_scope: request.log_scope,
+                resolved_logs: Some(resolved),
             },
         )?;
         self.session = Some(Session {
@@ -172,6 +202,8 @@ impl LogSession {
             lifecycle: Lifecycle::Recording(lease),
             archive: None,
             markers,
+            descriptor,
+            quiescent: None,
         });
         self.snapshot()
     }
@@ -199,9 +231,70 @@ impl LogSession {
                 }
             }
         }
+        if let Lifecycle::Finished(_) = &session.lifecycle {
+            if session.quiescent.is_none() {
+                session.markers.sync_all().map_err(|e| e.to_string())?;
+                session.quiescent = Some(crate::lease::FileLease::acquire(
+                    &session.directory.join("runtime/logs.writer"),
+                )?);
+                let proof = log_proof(&session.directory)?;
+                crate::lease::write(
+                    &session.directory.join("runtime/log-completion.json"),
+                    &proof,
+                )?;
+            }
+        }
         Ok(())
     }
+    pub fn open_saved(&mut self, directory: PathBuf) -> Result<Snapshot> {
+        self.refresh()?;
+        if self.session.as_ref().is_some_and(|s| {
+            matches!(
+                s.lifecycle,
+                Lifecycle::Recording(_) | Lifecycle::Unverified(_)
+            )
+        }) {
+            return Err(
+                "Stop and verify the active collector before opening saved evidence".into(),
+            );
+        }
+        let directory = fs::canonicalize(directory).map_err(|e| e.to_string())?;
+        let descriptor: SessionDescriptor = serde_json::from_slice(&files::read(&directory,"capture.json")?.ok_or("Saved logs have no versioned descriptor. Legacy evidence can be browsed without control admission")?).map_err(|e| e.to_string())?;
+        if descriptor.version != 1 || !matches!(descriptor.selection, CaptureSelection::Logs) {
+            return Err("Saved session is not a supported log-only capture".into());
+        }
+        let lease = crate::lease::FileLease::acquire(&directory.join("runtime/logs.writer"))?;
+        verify_log_proof(&directory)?;
+        let receipt: Receipt = serde_json::from_slice(
+            &files::read(&directory, "receipt.json")?.ok_or("Saved collector receipt missing")?,
+        )
+        .map_err(|e| e.to_string())?;
+        if !receipt.child_reaped {
+            return Err("Saved collector shutdown was not verified".into());
+        }
+        let markers =
+            files::open(&directory, "timeline/markers.jsonl").map_err(|e| e.to_string())?;
+        self.session = Some(Session {
+            id: descriptor.id.clone(),
+            device: descriptor.device.clone(),
+            directory,
+            started_at: descriptor.started_at.clone(),
+            limits: descriptor.limits.clone(),
+            lifecycle: Lifecycle::Finished(receipt),
+            archive: None,
+            markers,
+            descriptor,
+            quiescent: Some(lease),
+        });
+        self.snapshot()
+    }
+    pub fn status(&mut self) -> Result<Snapshot> {
+        self.snapshot_impl(false)
+    }
     pub fn snapshot(&mut self) -> Result<Snapshot> {
+        self.snapshot_impl(true)
+    }
+    fn snapshot_impl(&mut self, preview: bool) -> Result<Snapshot> {
         self.refresh()?;
         let Some(session) = &self.session else {
             return Ok(Snapshot::Idle {
@@ -209,9 +302,17 @@ impl LogSession {
                 limits: Limits::default(),
             });
         };
-        let logs = files::read(&session.directory, "logs/device.log")?.unwrap_or_default();
-        let markers =
-            files::read(&session.directory, "timeline/markers.jsonl")?.unwrap_or_default();
+        let bytes = fs::metadata(session.directory.join("logs/device.log")).map_or(0, |m| m.len());
+        let logs = if preview {
+            files::read(&session.directory, "logs/device.log")?.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let markers = if preview {
+            files::read(&session.directory, "timeline/markers.jsonl")?.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let live_logs = if matches!(session.lifecycle, Lifecycle::Recording(_)) {
             &logs[..logs
                 .iter()
@@ -225,13 +326,23 @@ impl LogSession {
         let log_count = events.iter().filter(|event| event.source == "logs").count();
         let marker_count = events.len() - log_count;
         timeline::retain_recent(&mut events);
+        for event in &mut events {
+            if event.summary.len() > 1024
+                || event
+                    .original_timestamp
+                    .as_ref()
+                    .is_some_and(|s| s.len() > 64)
+            {
+                timeline::preview(event);
+            }
+        }
         let receipt = if let Lifecycle::Finished(receipt) = &session.lifecycle {
             Some(receipt.clone())
         } else {
             None
         };
         let mut warnings = vec![
-            "Whole-device logs. App scope and network capture are unavailable.".into(),
+            format!("Android log scope: {:?}. All available emitted levels from main, system, and crash buffers.", session.descriptor.log_scope),
             "Device clock uncertainty is unknown. Time proximity does not establish causality."
                 .into(),
         ];
@@ -267,7 +378,7 @@ impl LogSession {
             started_at: session.started_at.clone(),
             limits: session.limits.clone(),
             fixture: self.fixture,
-            bytes: logs.len() as u64,
+            bytes,
             logs: log_count,
             markers: marker_count,
             events,
@@ -275,6 +386,12 @@ impl LogSession {
             archive: session.archive.clone(),
             network: NetworkView::NotSelected,
             warnings,
+            descriptor_version: session.descriptor.version,
+            selection: session.descriptor.selection.clone(),
+            log_scope: session.descriptor.log_scope.clone(),
+            network_policy: session.descriptor.network_policy.clone(),
+            context: session.descriptor.context.clone(),
+            log_attribution: session.descriptor.log_attribution.clone(),
         };
         Ok(match &session.lifecycle {
             Lifecycle::Recording(_) => Snapshot::Recording(view),
@@ -282,7 +399,7 @@ impl LogSession {
             Lifecycle::Finished(receipt)
                 if matches!(
                     receipt.reason,
-                    StopReason::CollectorExit | StopReason::ReadError
+                    StopReason::CollectorExit | StopReason::ReadError | StopReason::IdentityGap
                 ) =>
             {
                 Snapshot::Failed(view)
@@ -329,7 +446,28 @@ impl LogSession {
         }
         self.snapshot()
     }
+    pub fn prepare_save(&mut self) -> Result<crate::save::SaveHandle> {
+        self.refresh()?;
+        let session = self.session.as_ref().ok_or("There is no capture to save")?;
+        if !matches!(session.lifecycle, Lifecycle::Finished(_)) || session.quiescent.is_none() {
+            return Err("Save requires verified collector shutdown".into());
+        }
+        verify_log_proof(&session.directory)?;
+        crate::save::SaveHandle::create(&session.directory)
+    }
+    pub fn export_with_control(&mut self, control: &crate::save::SaveHandle) -> Result<PathBuf> {
+        self.refresh()?;
+        let session = self.session.as_ref().ok_or("There is no capture to save")?;
+        control.matches(&session.directory)?;
+        if !matches!(session.lifecycle, Lifecycle::Finished(_)) || session.quiescent.is_none() {
+            return Err("Save requires verified collector shutdown".into());
+        }
+        control.run(|| self.export_impl(Some(control)))
+    }
     pub fn export(&mut self) -> Result<PathBuf> {
+        self.export_impl(None)
+    }
+    fn export_impl(&mut self, control: Option<&crate::save::SaveHandle>) -> Result<PathBuf> {
         self.refresh()?;
         let session = self
             .session
@@ -338,19 +476,79 @@ impl LogSession {
         let Lifecycle::Finished(receipt) = &session.lifecycle else {
             return Err("Export requires a verified stopped collector".into());
         };
-        let archive = crate::evidence::export(
-            &session.directory,
-            &session.id,
-            &session.device,
-            &session.started_at,
-            &session.limits,
-            receipt,
-            self.fixture,
-        )?;
+        if let Some(control) = control {
+            control.matches(&session.directory)?;
+        }
+        verify_log_proof_controlled(&session.directory, control)?;
+        let archive = match control {
+            Some(control) => crate::evidence::export_controlled(
+                &session.directory,
+                &session.id,
+                &session.device,
+                &session.started_at,
+                &session.limits,
+                receipt,
+                self.fixture,
+                None,
+                control,
+            )?,
+            None => crate::evidence::export(
+                &session.directory,
+                &session.id,
+                &session.device,
+                &session.started_at,
+                &session.limits,
+                receipt,
+                self.fixture,
+            )?,
+        };
         session.archive = Some(archive.clone());
         Ok(archive)
     }
     pub fn directory(&self) -> Option<&Path> {
         self.session.as_ref().map(|s| s.directory.as_path())
     }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, PartialEq)]
+struct LogProof {
+    version: u32,
+    hashes: std::collections::BTreeMap<String, String>,
+}
+fn log_proof(directory: &Path) -> Result<LogProof> {
+    log_proof_controlled(directory, None)
+}
+fn log_proof_controlled(
+    directory: &Path,
+    control: Option<&crate::save::SaveHandle>,
+) -> Result<LogProof> {
+    let mut hashes = std::collections::BTreeMap::new();
+    for path in [
+        "capture.json",
+        "receipt.json",
+        "logs/device.log",
+        "timeline/markers.jsonl",
+    ] {
+        let bytes = crate::save::read(directory, path, control)?
+            .ok_or_else(|| format!("Stopped source missing: {path}"))?;
+        hashes.insert(path.to_owned(), crate::save::hash(&bytes, control)?);
+    }
+    Ok(LogProof { version: 1, hashes })
+}
+fn verify_log_proof(directory: &Path) -> Result<()> {
+    verify_log_proof_controlled(directory, None)
+}
+fn verify_log_proof_controlled(
+    directory: &Path,
+    control: Option<&crate::save::SaveHandle>,
+) -> Result<()> {
+    let saved: LogProof = serde_json::from_slice(
+        &files::read(directory, "runtime/log-completion.json")?
+            .ok_or("Saved logs have no private verified completion proof")?,
+    )
+    .map_err(|e| e.to_string())?;
+    if saved != log_proof_controlled(directory, control)? {
+        return Err("Saved logs differ from verified completion proof".into());
+    }
+    Ok(())
 }

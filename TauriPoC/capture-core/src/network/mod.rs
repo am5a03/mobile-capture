@@ -59,10 +59,30 @@ struct Guardian {
     _lease: FileLease,
     quiescent: Option<QuiescentSources>,
     sealed: Option<SealedEvidence>,
-    started: Instant,
 }
 impl Guardian {
     fn open(mut config: Bootstrap) -> Result<Self> {
+        config.request.limits.validate()?;
+        config.request.network_policy.validate()?;
+        config.request.context.validate()?;
+        if !config.recovery {
+            config.descriptor_version = 1;
+            match &config.request.selection {
+                CaptureSelection::Network(consent) | CaptureSelection::LogsAndNetwork(consent)
+                    if consent.whole_device => {}
+                _ => {
+                    return Err(
+                        "Guardian requires explicit whole-device network capture consent".into(),
+                    )
+                }
+            }
+            if config.request.selection.includes_logs()
+                && matches!(config.request.log_scope, LogScope::WholeDevice)
+                && !config.request.whole_device_consent
+            {
+                return Err("Whole-device Android log consent is required".into());
+            }
+        }
         if !config.recovery {
             config.tools.adb = crate::process::absolute_executable(&config.tools.adb)?;
         } else if !config.tools.adb.is_absolute() {
@@ -70,19 +90,8 @@ impl Guardian {
         }
         let mut lock = FileLease::acquire_owner(&config.lock)?;
         if let Some(prior) = lock.prior()? {
-            if prior != config.directory && prior.join("session.json").exists() {
-                let state: serde_json::Value = lease::read(&prior.join("session.json"))?;
-                if state["routing_restored"] == false
-                    || !matches!(
-                        state["phase"].as_str(),
-                        Some("stopped" | "saved" | "partial" | "failed")
-                    )
-                {
-                    return Err(format!(
-                        "A previous capture needs recovery at {}",
-                        prior.display()
-                    ));
-                }
+            if prior != config.directory || !config.recovery {
+                verify_prior_completion(&prior)?;
             }
         }
         lease::private_directory(&config.directory.join("runtime"))?;
@@ -118,6 +127,22 @@ impl Guardian {
         };
         lease::write(&config.directory.join("session.json"), &header)?;
         lease::write(&config.directory.join("runtime/bootstrap.json"), &config)?;
+        if !config.recovery {
+            let descriptor = SessionDescriptor {
+                version: 1,
+                id: header.id.clone(),
+                device: header.device.clone(),
+                started_at: header.started_at.clone(),
+                selection: config.request.selection.clone(),
+                log_scope: config.request.log_scope.clone(),
+                limits: config.request.limits.clone(),
+                network_policy: config.request.network_policy.clone(),
+                fixture: config.fixture,
+                context: config.request.context.clone(),
+                log_attribution: config.resolved_logs.as_ref().map(|r| r.attribution.clone()),
+            };
+            lease::write(&config.directory.join("capture.json"), &descriptor)?;
+        }
         lock.publish(&config.directory)?;
         let markers = OpenOptions::new()
             .create(true)
@@ -139,7 +164,6 @@ impl Guardian {
             _lease: lock,
             quiescent: None,
             sealed: None,
-            started: Instant::now(),
         })
     }
     fn record(&self, event: serde_json::Value) {
@@ -181,28 +205,33 @@ impl Guardian {
             &self.config.ca,
             port,
             false,
+            &self.config.request.network_policy,
         )?);
-        self.logs = Some(LogCollector::launch(
-            &self.config.tools.worker,
-            &WorkerConfig {
-                adb: self.config.tools.adb.clone(),
-                serial: self.config.request.serial.clone(),
-                directory: self.config.directory.clone(),
-                limits: self.config.request.limits.clone(),
-                source_lease: true,
-            },
-        )?);
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while !self
-            .config
-            .directory
-            .join("runtime/log-ready.json")
-            .exists()
-        {
-            if Instant::now() >= deadline {
-                return Err("Log source did not acknowledge its writer lease".into());
+        if self.config.request.selection.includes_logs() {
+            self.logs = Some(LogCollector::launch(
+                &self.config.tools.worker,
+                &WorkerConfig {
+                    adb: self.config.tools.adb.clone(),
+                    serial: self.config.request.serial.clone(),
+                    directory: self.config.directory.clone(),
+                    limits: self.config.request.limits.clone(),
+                    source_lease: true,
+                    log_scope: self.config.request.log_scope.clone(),
+                    resolved_logs: self.config.resolved_logs.clone(),
+                },
+            )?);
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !self
+                .config
+                .directory
+                .join("runtime/log-ready.json")
+                .exists()
+            {
+                if Instant::now() >= deadline {
+                    return Err("Log source did not acknowledge its writer lease".into());
+                }
+                thread::sleep(Duration::from_millis(10));
             }
-            thread::sleep(Duration::from_millis(10));
         }
         let route = Route::prepare(
             self.config.tools.adb.clone(),
@@ -236,6 +265,7 @@ impl Guardian {
                 &self.config.ca,
                 port,
                 true,
+                &self.config.request.network_policy,
             )
             .map_err(|e| {
                 format!("Recovery listener unavailable. No process was terminated. {e}")
@@ -278,35 +308,61 @@ impl Guardian {
             &self.config.directory.join("runtime/engine-config.json"),
         ) {
             coverage.synthetic_check_url = Some(format!(
-                "http://mitm.it/mobile-capture-check/{}",
+                "https://mitm.it/mobile-capture-check/{}/https",
                 config.setup_nonce
             ));
         }
         coverage
     }
     fn view(&self) -> Result<SessionView> {
-        let logs =
-            crate::files::read(&self.config.directory, "logs/device.log")?.unwrap_or_default();
-        let markers = crate::files::read(&self.config.directory, "timeline/markers.jsonl")?
-            .unwrap_or_default();
+        self.view_impl(true)
+    }
+    fn view_impl(&self, preview: bool) -> Result<SessionView> {
+        let bytes =
+            fs::metadata(self.config.directory.join("logs/device.log")).map_or(0, |m| m.len());
+        let logs = if preview {
+            crate::files::read(&self.config.directory, "logs/device.log")?.unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let markers = if preview {
+            crate::files::read(&self.config.directory, "timeline/markers.jsonl")?
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         let rawlogs = if self.header.completion.is_none() {
             &logs[..logs.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1)]
         } else {
             &logs
         };
         let mut events = timeline::events(rawlogs, &markers, &self.header.started_at);
-        events.extend(timeline::network_events(
-            &self.config.directory,
-            &self.header.started_at,
-            self.header.completion.is_none(),
-        )?);
+        if preview {
+            events.extend(timeline::network_events(
+                &self.config.directory,
+                &self.header.started_at,
+                self.header.completion.is_none(),
+            )?);
+        }
         let log_count = events.iter().filter(|e| e.source == "logs").count();
         let marker_count = events.iter().filter(|e| e.source == "marker").count();
         timeline::retain_recent(&mut events);
         for event in &mut events {
             timeline::preview(event);
         }
-        let mut warnings=vec!["Whole-device logs and HTTP(S) proxy evidence. Manual CA trust is required; certificate pinning can prevent observation.".into(),"Device clock uncertainty is unknown. Time proximity is inferred.".into()];
+        let log_notice = if !self.config.request.selection.includes_logs() {
+            "Device logs were not selected.".to_owned()
+        } else {
+            match &self.config.request.log_scope {
+                LogScope::App { application_id } => {
+                    format!("Device logs are limited to {application_id}.")
+                }
+                LogScope::WholeDevice => {
+                    "Device logs cover all apps and system processes.".to_owned()
+                }
+            }
+        };
+        let mut warnings = vec![format!("{log_notice} Network capture covers whole-device HTTP(S). HTTPS requires manual CA trust; certificate pinning can prevent observation."), "Timestamp proximity does not prove causation.".into()];
         if self.config.fixture {
             warnings.push("FIXTURE MODE. Compiled fake ADB evidence, not a phone.".into());
         }
@@ -336,7 +392,7 @@ impl Guardian {
             started_at: self.header.started_at.clone(),
             limits: self.config.request.limits.clone(),
             fixture: self.config.fixture,
-            bytes: logs.len() as u64,
+            bytes,
             logs: log_count,
             markers: marker_count,
             events,
@@ -344,12 +400,28 @@ impl Guardian {
             archive: self.header.archive.clone(),
             warnings,
             network,
+            descriptor_version: self.config.descriptor_version,
+            selection: self.config.request.selection.clone(),
+            log_scope: self.config.request.log_scope.clone(),
+            network_policy: self.config.request.network_policy.clone(),
+            context: self.config.request.context.clone(),
+            log_attribution: self
+                .config
+                .resolved_logs
+                .as_ref()
+                .map(|r| r.attribution.clone()),
         };
         lease::write(&self.config.directory.join("runtime/view.json"), &view)?;
         Ok(view)
     }
     fn snapshot(&self) -> Result<Snapshot> {
-        let view = self.view()?;
+        self.snapshot_impl(true)
+    }
+    fn status(&self) -> Result<Snapshot> {
+        self.snapshot_impl(false)
+    }
+    fn snapshot_impl(&self, preview: bool) -> Result<Snapshot> {
+        let view = self.view_impl(preview)?;
         Ok(
             if self.header.error.is_some() && self.header.routing_restored {
                 Snapshot::UnverifiedShutdown(view)
@@ -439,8 +511,21 @@ impl Guardian {
                 .unwrap_or(serde_json::json!({"missing_artifact":true}));
         let receipt: Option<Receipt> =
             lease::read(&self.config.directory.join("receipt.json")).ok();
-        if receipt.is_none() {
+        if self.config.request.selection.includes_logs() && receipt.is_none() {
             reasons.push("Log source has no completion receipt".into());
+        }
+        if let Some(receipt) = &receipt {
+            if self.config.request.selection.includes_logs()
+                && (receipt.reason != StopReason::LeaseClosed
+                    || receipt.forced
+                    || receipt.incomplete_tail
+                    || !receipt.stderr.is_empty())
+            {
+                reasons.push(format!(
+                    "Log source ended {:?}. {}",
+                    receipt.reason, receipt.stderr
+                ));
+            }
         }
         if timeline::network_events(&self.config.directory, &self.header.started_at, false)?
             .iter()
@@ -505,12 +590,60 @@ impl Guardian {
             .map_err(|e| e.to_string())?;
         self.snapshot()
     }
-    fn export(&mut self) -> Result<PathBuf> {
+    fn export(&mut self, control: Option<&crate::save::SaveHandle>) -> Result<PathBuf> {
+        if let Some(control) = control {
+            control.matches(&self.config.directory)?;
+        }
+        if self.config.descriptor_version == 1 {
+            let public: serde_json::Value = serde_json::from_slice(
+                &crate::files::read(&self.config.directory, "capture.json")?
+                    .ok_or("Versioned public descriptor is missing")?,
+            )
+            .map_err(|e| e.to_string())?;
+            let expected = SessionDescriptor {
+                version: 1,
+                id: self.header.id.clone(),
+                device: self.header.device.clone(),
+                started_at: self.header.started_at.clone(),
+                selection: self.config.request.selection.clone(),
+                log_scope: self.config.request.log_scope.clone(),
+                limits: self.config.request.limits.clone(),
+                network_policy: self.config.request.network_policy.clone(),
+                fixture: self.config.fixture,
+                context: self.config.request.context.clone(),
+                log_attribution: self
+                    .config
+                    .resolved_logs
+                    .as_ref()
+                    .map(|r| r.attribution.clone()),
+            };
+            if public != serde_json::to_value(expected).map_err(|e| e.to_string())? {
+                return Err(
+                    "Public capture descriptor differs from the admitted source configuration"
+                        .into(),
+                );
+            }
+        }
         let sealed = self
             .sealed
             .as_ref()
             .ok_or("Restore routing and prove source quiescence before export")?;
-        let receipt = lease::read(&self.config.directory.join("receipt.json")).unwrap_or(Receipt {
+        let receipt =
+            lease::read(&self.config.directory.join("receipt.json")).unwrap_or_else(|_| {
+                if !self.config.request.selection.includes_logs() {
+                    Receipt {
+                        reason: StopReason::LeaseClosed,
+                        bytes: 0,
+                        records: 0,
+                        incomplete_tail: false,
+                        child_reaped: true,
+                        forced: false,
+                        exit_code: None,
+                        stderr: String::new(),
+                        ended_at: now(),
+                    }
+                } else {
+                    Receipt {
             reason: StopReason::ReadError,
             bytes: fs::metadata(self.config.directory.join("logs/device.log"))
                 .map_or(0, |m| m.len()),
@@ -522,17 +655,32 @@ impl Guardian {
             stderr: "Guardian interrupted; source lease proves writer quiescence without a receipt"
                 .into(),
             ended_at: now(),
-        });
-        let archive = crate::evidence::export_network(
-            &self.config.directory,
-            &self.header.id,
-            &self.header.device,
-            &self.header.started_at,
-            &self.config.request.limits,
-            &receipt,
-            self.config.fixture,
-            sealed,
-        )?;
+        }
+                }
+            });
+        let archive = match control {
+            Some(control) => crate::evidence::export_controlled(
+                &self.config.directory,
+                &self.header.id,
+                &self.header.device,
+                &self.header.started_at,
+                &self.config.request.limits,
+                &receipt,
+                self.config.fixture,
+                Some(sealed),
+                control,
+            )?,
+            None => crate::evidence::export_network(
+                &self.config.directory,
+                &self.header.id,
+                &self.header.device,
+                &self.header.started_at,
+                &self.config.request.limits,
+                &receipt,
+                self.config.fixture,
+                sealed,
+            )?,
+        };
         self.header.archive = Some(archive.clone());
         self.save()?;
         Ok(archive)
@@ -614,9 +762,15 @@ fn run_inner(path: &Path) -> Result<()> {
                         Action::Attach | Action::Snapshot => {
                             guardian.snapshot().map(Reply::Snapshot)
                         }
+                        Action::Status => guardian.status().map(Reply::Snapshot),
                         Action::Marker(text) => guardian.marker(text).map(Reply::Snapshot),
                         Action::Stop | Action::Recover => guardian.stop().map(Reply::Stop),
-                        Action::Export => guardian.export().map(Reply::Archive),
+                        Action::Export => guardian.export(None).map(Reply::Archive),
+                        Action::ExportControlled(id) => {
+                            crate::save::SaveHandle::open(&guardian.config.directory, &id)
+                                .and_then(|control| control.run(|| guardian.export(Some(&control))))
+                                .map(Reply::Archive)
+                        }
                     }
                 };
                 let sent = if drop_reply {
@@ -657,11 +811,7 @@ fn run_inner(path: &Path) -> Result<()> {
                 .engine
                 .as_mut()
                 .is_some_and(|e| e.exited().unwrap_or(true));
-            if failed
-                || guardian.header.phase == "recording"
-                    && guardian.started.elapsed().as_millis()
-                        >= guardian.config.request.limits.duration_ms as u128
-            {
+            if failed {
                 let _ = guardian.stop();
             }
         }
@@ -699,6 +849,12 @@ pub(crate) fn offline_snapshot(directory: &Path) -> Result<Snapshot> {
                 warnings: vec![
                     "Source previews are unavailable until the guardian is recovered.".into(),
                 ],
+                descriptor_version: config.descriptor_version,
+                selection: config.request.selection,
+                log_scope: config.request.log_scope,
+                network_policy: config.request.network_policy,
+                context: config.request.context,
+                log_attribution: config.resolved_logs.map(|r| r.attribution),
                 network: NetworkView::RecoveryRequired(RecoveryProblem {
                     message: "Published capture needs guardian recovery".into(),
                     guardian_interrupted: true,
@@ -730,4 +886,158 @@ pub(crate) fn published_pending(directory: &Path) -> bool {
 pub(crate) fn sealed_on_disk(directory: &Path) -> bool {
     lease::read::<Header>(&directory.join("session.json"))
         .is_ok_and(|header| header.routing_restored && header.completion.is_some())
+}
+
+pub(crate) fn verify_prior_completion(directory: &Path) -> Result<()> {
+    #[derive(Deserialize)]
+    struct PriorCompletion {
+        phase: String,
+        routing_restored: bool,
+    }
+    let verified = (|| {
+        let state: PriorCompletion = lease::read(&directory.join("session.json"))?;
+        if !state.routing_restored
+            || !matches!(
+                state.phase.as_str(),
+                "stopped" | "saved" | "partial" | "failed"
+            )
+        {
+            return Err("Prior session is not completed with restored routing".into());
+        }
+        Ok(())
+    })();
+    verified.map_err(|error: String| {
+        format!(
+            "Previous capture completion cannot be verified at {}. Restore the session files and retry recovery in the owning app before starting another capture. {error}",
+            directory.display()
+        )
+    })
+}
+
+pub(crate) fn admit_saved(directory: &Path, lock: &Path) -> Result<()> {
+    let config: Bootstrap = lease::read(&directory.join("runtime/bootstrap.json"))?;
+    if config.directory != directory || config.lock != lock {
+        return Err("Saved private capture identity does not match this control namespace".into());
+    }
+    let header: Header = lease::read(&directory.join("session.json"))?;
+    if !header.routing_restored
+        || !header
+            .completion
+            .as_ref()
+            .is_some_and(|c| c.routing_restored)
+    {
+        return Err(
+            "Saved network capture requires explicit recovery before it can be opened for export"
+                .into(),
+        );
+    }
+    if directory.join("runtime/routing.json").exists() {
+        let route: Route = lease::read(&directory.join("runtime/routing.json"))?;
+        if !route.restored {
+            return Err("Private routing journal does not prove a restored capture".into());
+        }
+    }
+    let _owner = FileLease::acquire_owner(lock)?;
+    let _logs = FileLease::acquire(&directory.join("runtime/logs.writer"))?;
+    let _network = FileLease::acquire(&directory.join("runtime/network.writer"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn config(root: &Path) -> Bootstrap {
+        Bootstrap {
+            paths: CapturePaths {
+                output_root: root.join("output"),
+                runtime_root: Some(root.join("private")),
+            },
+            tools: ToolSelection {
+                adb: std::env::current_exe().unwrap(),
+                worker: "unused-worker".into(),
+                guardian: "unused-guardian".into(),
+                mitmdump: None,
+                addon: "unused-addon".into(),
+            },
+            fixture: true,
+            request: StartRequest {
+                serial: "unused-device".into(),
+                whole_device_consent: true,
+                selection: CaptureSelection::Network(NetworkConsent { whole_device: true }),
+                limits: Limits::default(),
+                log_scope: LogScope::default(),
+                network_policy: NetworkPolicy::default(),
+                context: CaptureContext::default(),
+            },
+            directory: root.join("new-session"),
+            recovery: false,
+            fixture_drop_initial_reply: false,
+            ca: root.join("unused-ca"),
+            lock: root.join("private/owner.lock"),
+            resolved_logs: None,
+            descriptor_version: 1,
+        }
+    }
+    #[test]
+    fn guardian_refuses_missing_or_unverified_prior_metadata_before_publish() {
+        let states = [
+            None,
+            Some(json!({"phase":"saved"})),
+            Some(json!({"phase":"saved","routing_restored":null})),
+            Some(json!({"phase":"saved","routing_restored":false})),
+            Some(json!({"phase":"recording","routing_restored":true})),
+            Some(json!({"phase":"unknown","routing_restored":true})),
+        ];
+        for (index, state) in states.into_iter().enumerate() {
+            let root = tempfile::tempdir().unwrap();
+            let config = config(root.path());
+            let prior = root.path().join("previous-session");
+            if let Some(state) = state {
+                lease::write(&prior.join("session.json"), &state).unwrap();
+            }
+            let mut owner = FileLease::acquire_owner(&config.lock).unwrap();
+            owner.publish(&prior).unwrap();
+            drop(owner);
+            let locator = fs::read(&config.lock).unwrap();
+            let lock = config.lock.clone();
+            let directory = config.directory.clone();
+            let result = Guardian::open(config);
+            let Err(error) = result else {
+                panic!("Guardian accepted unverified prior state {index}");
+            };
+            assert!(error.contains(&prior.display().to_string()), "{error}");
+            assert!(error.contains("Restore"), "{error}");
+            assert!(error.contains("owning app"), "{error}");
+            assert_eq!(fs::read(&lock).unwrap(), locator);
+            assert!(!directory.exists());
+            assert!(FileLease::acquire_owner(&lock).is_ok());
+        }
+    }
+    #[test]
+    fn guardian_accepts_completed_prior_metadata_without_a_bootstrap() {
+        for phase in ["saved", "partial", "failed", "stopped"] {
+            let root = tempfile::tempdir().unwrap();
+            let config = config(root.path());
+            let prior = root.path().join("previous-session");
+            lease::write(
+                &prior.join("session.json"),
+                &json!({
+                    "phase":phase,"routing_restored":true
+                }),
+            )
+            .unwrap();
+            let mut owner = FileLease::acquire_owner(&config.lock).unwrap();
+            owner.publish(&prior).unwrap();
+            drop(owner);
+            let mut guardian = Guardian::open(config).unwrap();
+            assert_eq!(
+                guardian._lease.prior().unwrap(),
+                Some(guardian.config.directory.clone())
+            );
+            assert!(guardian.engine.is_none());
+            assert!(guardian.route.is_none());
+        }
+    }
 }
