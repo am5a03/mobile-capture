@@ -78,13 +78,31 @@ the normalized timeline, retain original timestamps and clock uncertainty, and
 do not claim causal correlation from timestamps alone.
 
 mitmdump writes `network/capture.mitm`; the addon writes a full HAR and canonical
-network JSONL events with complete headers and bodies. Binary bodies use base64.
-HAR response content uses standard `encoding: base64`; request `postData` uses
-an explicit base64 extension (`encoding` and `_encoding`). No body size limit is
-configured. Unavailable bodies and unfinished requests are reported separately
-from empty bodies. HAR is rewritten atomically after events; native flows retain
-the original mitmproxy representation. WebSocket/UDP inspection is outside this
-prototype's normalized HTTP timeline.
+network JSONL events with complete headers and bodies. HAR textual JSON, XML,
+text, and URL-encoded request bodies use plain Unicode `postData.text`, after
+strict HTTP content decoding and charset conversion. A declared charset takes
+precedence; otherwise a Unicode BOM is recognized, with UTF-8 as the default.
+Forms keep their original URL-encoded text; `params` is not emitted alongside
+`text`. SDK tokens inside a
+text body are never treated as an encoding instruction.
+
+Binary requests and text that cannot be decoded use the existing base64 extension
+(`encoding` and `_encoding`). `_contentDecodingError` marks failed HTTP decoding,
+`_textDecodingError` marks a failed charset conversion, and `_byteBasis` identifies
+whether base64 contains decoded `content` or original `raw_content`. HAR response
+content retains standard `encoding: base64`. `bodySize` counts the retained wire
+body; response `content.size` counts decoded bytes when decoding succeeds.
+
+Native flows retain the original bytes. JSONL body details retain their existing
+lossless UTF-8/base64 representation, with `byte_basis`; when HTTP decoding changes
+the bytes, a nested `raw` base64 record also preserves the original wire body.
+No body size limit is configured. Unavailable bodies and unfinished requests are
+reported separately from empty bodies. HAR is rewritten atomically after events.
+This follows the
+[HAR 1.2 text/params and response encoding definitions](https://github.com/ahmadnassri/har-spec/blob/master/versions/1.2.md#postdata).
+Legacy all-base64 HARs still require a reader that decodes only explicit encoding
+flags. The separate Tauri prototype is not on `main` and is outside this fix.
+WebSocket/UDP inspection is outside this prototype's normalized HTTP timeline.
 
 ## Ownership and recovery
 
@@ -132,3 +150,23 @@ host proxy or CA trust. Tests need permission to create local Unix/TCP sockets;
 a network-restricted sandbox may require running them outside that sandbox.
 Live Android/Simulator proof is a separate explicit operation with neutral apps
 and fresh markers, not something these tests claim to establish.
+
+## Verify HAR interoperability
+
+Run the offline synthetic fixtures with:
+
+```sh
+python3 -B -m unittest discover -s Tests/Capture -p test_har_export.py -v
+```
+
+For actual compression/charset APIs and native-flow byte preservation, run the
+same suite inside a signed, packaged engine:
+
+```sh
+Scripts/test-har-export-engine.sh "/path/to/Mobile Capture.app/Contents/Frameworks/CaptureDependencies/mitmproxy.app/Contents/MacOS/mitmdump"
+```
+
+Optionally set `CAPTURE_HAR_ANALYZER` to an existing `analyze_identity_charles.sh`
+to verify that its current plain-text analysis reads synthetic JSON/form bodies.
+The engine runs with no proxy server and an isolated temporary configuration.
+These checks do not establish Charles UI import compatibility.

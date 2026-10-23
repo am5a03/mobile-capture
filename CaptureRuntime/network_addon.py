@@ -1,6 +1,7 @@
-"""mitmproxy addon. Full bodies remain in native flows and base64 HAR fields."""
+"""Readable HAR request text with lossless native-flow and evidence bodies."""
 import base64
 import datetime as dt
+from email.message import Message
 import json
 import os
 import re
@@ -88,53 +89,97 @@ class CaptureAddon:
 
     @staticmethod
     def body(message):
+        if message.raw_content is None:
+            return None, False
         try:
-            return message.content or b""
+            return message.content, False
         except ValueError:
-            return message.raw_content or b""
+            return message.raw_content, True
 
     def body_detail(self, message):
         if message.raw_content is None:
             return {"encoding": None, "text": None, "bytes": None, "unavailable": True,
                     "reason": "mitmproxy did not retain this body; this is not an empty body"}
-        body = self.body(message)
+        body, decoding_error = self.body(message)
         try:
-            return {"encoding": "utf-8", "text": body.decode("utf-8"), "bytes": len(body)}
+            detail = {"encoding": "utf-8", "text": body.decode("utf-8"), "bytes": len(body)}
         except UnicodeDecodeError:
-            return {"encoding": "base64", "text": base64.b64encode(body).decode("ascii"), "bytes": len(body)}
+            detail = {"encoding": "base64", "text": base64.b64encode(body).decode("ascii"), "bytes": len(body)}
+        detail["byte_basis"] = "content" if body != message.raw_content else "raw_content"
+        if body != message.raw_content:
+            detail["raw"] = {"encoding": "base64", "text": base64.b64encode(message.raw_content).decode("ascii"),
+                             "bytes": len(message.raw_content), "byte_basis": "raw_content"}
+        if decoding_error:
+            detail["content_decoding_error"] = True
+        return detail
+
+    @staticmethod
+    def post_data(message, body, decoding_error):
+        mime = message.headers.get("content-type", "application/octet-stream")
+        media_type = mime.split(";", 1)[0].strip().lower()
+        textual = (media_type.startswith("text/") or media_type.endswith(("+json", "+xml")) or
+                   media_type in {"application/json", "application/xml", "application/javascript",
+                                  "application/graphql", "application/x-www-form-urlencoded"})
+        post = {"mimeType": mime}
+        if not decoding_error and (textual or not body):
+            try:
+                header = Message()
+                header["content-type"] = mime
+                charset = header.get_content_charset()
+                if not charset:
+                    if body.startswith((b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00")):
+                        charset = "utf-32"
+                    elif body.startswith((b"\xfe\xff", b"\xff\xfe")):
+                        charset = "utf-16"
+                    else:
+                        charset = "utf-8-sig"
+                text = body.decode(charset).removeprefix("\ufeff")
+                text.encode("utf-8")
+                if not any(ord(character) < 32 and character not in "\t\r\n" for character in text):
+                    return dict(post, text=text)
+            except (ValueError, LookupError):
+                post["_textDecodingError"] = True
+        post.update(text=base64.b64encode(body).decode("ascii"), encoding="base64", _encoding="base64",
+                    _byteBasis="raw_content" if decoding_error else "content")
+        if decoding_error:
+            post["_contentDecodingError"] = True
+        return post
 
     def entry(self, flow):
         request, response = flow.request, flow.response
-        request_body = self.body(request)
+        request_body, request_decoding_error = self.body(request)
         end = (getattr(response, "timestamp_end", None) if response else None) or time.time()
         result = {"startedDateTime": iso(request.timestamp_start), "time": max(0, (end - request.timestamp_start) * 1000),
                   "request": {"method": request.method, "url": request.pretty_url,
                               "httpVersion": request.http_version, "cookies": [], "headers": self.headers(request),
                               "queryString": [{"name": k, "value": v} for k, v in request.query.items(multi=True)],
-                              "headersSize": -1, "bodySize": len(request_body)},
+                              "headersSize": -1, "bodySize": len(request.raw_content) if request.raw_content is not None else -1},
                   "response": {"status": 0, "statusText": "Incomplete", "httpVersion": "", "cookies": [],
-                               "headers": [], "content": {"size": 0, "mimeType": "", "text": "", "encoding": "base64"},
+                               "headers": [], "content": {"size": -1, "mimeType": "", "_bodyUnavailable": True},
                                "redirectURL": "", "headersSize": -1, "bodySize": -1},
                   "cache": {}, "timings": {"send": 0, "wait": -1, "receive": 0},
                   "_flow_id": flow.id, "_incomplete": response is None}
-        if request_body:
-            result["request"]["postData"] = {"mimeType": request.headers.get("content-type", "application/octet-stream"),
-                                                "text": base64.b64encode(request_body).decode("ascii"),
-                                                "encoding": "base64", "_encoding": "base64"}
+        if request_body is not None and (request_body or request.method in {"POST", "PUT", "PATCH"}):
+            result["request"]["postData"] = self.post_data(request, request_body, request_decoding_error)
         if request.raw_content is None:
             result["request"]["_bodyUnavailable"] = True
             result["request"]["bodySize"] = -1
         if response:
-            body = self.body(response)
+            body, response_decoding_error = self.body(response)
             result["response"] = {"status": response.status_code, "statusText": response.reason,
                                   "httpVersion": response.http_version, "cookies": [], "headers": self.headers(response),
-                                  "content": {"size": len(body), "mimeType": response.headers.get("content-type", ""),
-                                              "text": base64.b64encode(body).decode("ascii"), "encoding": "base64"},
-                                  "redirectURL": response.headers.get("location", ""), "headersSize": -1, "bodySize": len(body)}
+                                  "content": {"size": len(body) if body is not None else -1, "mimeType": response.headers.get("content-type", ""),
+                                              "text": base64.b64encode(body or b"").decode("ascii"), "encoding": "base64"},
+                                  "redirectURL": response.headers.get("location", ""), "headersSize": -1,
+                                  "bodySize": len(response.raw_content) if response.raw_content is not None else -1}
             if response.raw_content is None:
                 result["response"]["_bodyUnavailable"] = True
                 result["response"]["bodySize"] = -1
-                result["response"]["content"]["size"] = -1
+                result["response"]["content"].pop("text")
+                result["response"]["content"].pop("encoding")
+                result["response"]["content"]["_bodyUnavailable"] = True
+            if response_decoding_error:
+                result["response"]["content"].update(_contentDecodingError=True, _byteBasis="raw_content")
         if getattr(flow, "error", None):
             result["_error"] = str(flow.error)
         return result
@@ -142,7 +187,7 @@ class CaptureAddon:
     def flush(self):
         payload = {"log": {"version": "1.2", "creator": {"name": "Capture Companion", "version": "0.1"},
                            "entries": list(self.entries.values()),
-                           "comment": "Request postData uses the base64 encoding extension. Bodies are not truncated."}}
+                           "comment": "Textual request postData is HTTP decoded Unicode text. Binary or undecodable requests use the explicit base64 extension. Bodies are not truncated."}}
         temp = self.root / "capture.har.tmp"
         temp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         temp.replace(self.root / "capture.har")
